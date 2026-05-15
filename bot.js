@@ -277,8 +277,18 @@ function apiRequest(method, urlPath, body, token) {
 }
 
 // ─── Mention parsing ──────────────────────────────────────────────────────────
+function parseMention(arg) {
+  const mentionMatch = arg.match(/^<@!?([0-9]+)>$/);
+  if (mentionMatch) return mentionMatch[1];
+  if (/^[0-9]+$/.test(arg)) return arg;
+  return null;
+}
+
 function getMentionedId(args) {
-  for (const arg of args) { const id = parseMention(arg.trim()); if (id) return id; }
+  for (const arg of args) {
+    const id = parseMention(arg.trim());
+    if (id) return id;
+  }
   return null;
 }
 
