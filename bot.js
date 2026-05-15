@@ -40,6 +40,29 @@ const FISH_RARITY_BOOST = {
   legendary: 3,
 };
 
+const JOKES = [
+  "Why don't scientists trust atoms? Because they make up everything!",
+  "What do you call a fish wearing a bowtie? So-fish-ticated!",
+  "Why did the scarecrow win an award? He was outstanding in his field!",
+  "What do you call a bear with no teeth? A gummy bear!",
+  "Why don't eggs tell jokes? They'd crack each other up!",
+  "What did the ocean say to the beach? Nothing, it just waved!",
+  "Why did the coffee file a police report? It got mugged!",
+  "How do you organize a space party? You planet!",
+  "What do you call a sleeping bull? A dozer!",
+  "Why did the math book look sad? Because it had too many problems!",
+  "What did one wall say to the other wall? I'll meet you at the corner!",
+  "Why don't skeletons fight each other? They don't have the guts!",
+  "What do you call a dinosaur that crashes his car? Tyrannosaurus Wrecks!",
+  "Why did the chicken cross the road? To prove it wasn't a coward!",
+  "What's orange and sounds like a parrot? A carrot!",
+  "Why did the kid bring a ladder to school? Because he wanted to go to high school!",
+  "What do you call a pig that does karate? A pork chop!",
+  "Why is there a door in the middle of the road? Because it's a road house!",
+  "What did the one candle say to the other? Don't birthdays just burn you up?",
+  "Why don't you ever see elephants hiding in trees? Because they're so good at it!",
+];
+
 const ACHIEVEMENTS = {
   first_fish: { name: "First Catch", description: "Catch your first fish." },
   first_sell: { name: "First Sale", description: "Sell a fish or item for the first time." },
@@ -362,6 +385,7 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}ping\` — Check if the bot is alive`,
         `\`${PREFIX}help\` — Show this message`,
         `\`${PREFIX}info\` — Bot info`,
+        `\`${PREFIX}joke\` — Tell a random joke`,
         "",
         "**Tools**",
         `\`${PREFIX}calc <expression>\` — Calculate math (e.g. \`${PREFIX}calc 5x3\`)`,
@@ -405,6 +429,12 @@ async function handleCommand(name, args, msg, token) {
       const targetName = targetId ? (msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`) : args.join(" ") || "that user";
       const mention = targetId ? `<@${targetId}>` : targetName;
       await send(ch, `🔨 **${mention}** has been banned from the server.\n> *Reason: violating community rules.*`, token);
+      break;
+    }
+
+    case "joke": {
+      const randomJoke = JOKES[Math.floor(Math.random() * JOKES.length)];
+      await send(ch, `😂 ${randomJoke}`, token);
       break;
     }
 
