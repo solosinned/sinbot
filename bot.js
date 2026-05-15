@@ -181,11 +181,14 @@ function getUser(data, userId) {
       followers: [],
       following: [],
       blacklisted: false,
+      whitelisted: false,
       totalFishCaught: 0,
       totalRareCaught: 0,
       totalFishSold: 0,
       totalItemsSold: 0,
       totalLootboxesOpened: 0,
+      lootboxPurchases: [],
+      joinedAt: Date.now(),
     };
   }
   return data[userId];
@@ -292,6 +295,22 @@ function getMentionedId(args) {
   return null;
 }
 
+function getMentionedUser(msg, args) {
+  // First check direct mentions in args
+  const mentionId = getMentionedId(args);
+  if (mentionId) {
+    const mentionedUser = msg.mentions.find((m) => m.id === mentionId);
+    return { id: mentionId, username: mentionedUser?.username ?? `User${mentionId}` };
+  }
+  
+  // Then check msg.mentions array (should have parsed mentions from Discord)
+  if (msg.mentions && msg.mentions.length > 0) {
+    return { id: msg.mentions[0].id, username: msg.mentions[0].username };
+  }
+  
+  return null;
+}
+
 // ─── Calculator ───────────────────────────────────────────────────────────────
 function calculate(expr) {
   let cleaned = expr.replace(/[×x]/gi, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/[^0-9+\-*/().\s*]/g, "");
@@ -360,7 +379,7 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}inventory\` — See your fish and collectible items`,
         `\`${PREFIX}sell <fish/item name>\` — Sell a fish or collectible`,
         `\`${PREFIX}achievements\` — View your earned achievements`,
-        `\`${PREFIX}stats\` — See your fishing and collectible stats`,
+        `\`${PREFIX}stats [@user]\` — See stats (optionally view other users)`,
         `\`${PREFIX}leaderboard\` — View the top sincoin holders`,
         `\`${PREFIX}follow @user\` — Follow another user`,
         "",
@@ -450,6 +469,22 @@ async function handleCommand(name, args, msg, token) {
       if (!itemKey || !SHOP_ITEMS[itemKey]) { await send(ch, `❌ Unknown item. Use \`${PREFIX}shop\` to see available items.`, token); break; }
       const item = SHOP_ITEMS[itemKey];
       if (user.balance < item.cost) { await send(ch, `❌ You need **${item.cost.toLocaleString()} sincoins** but only have **${user.balance.toLocaleString()}**.`, token); break; }
+      
+      // Lootbox cooldown check (12 per 15 hours)
+      if (item.type === "lootbox") {
+        const now = Date.now();
+        const fifteenHoursMs = 15 * 60 * 60 * 1000;
+        const recentPurchases = (user.lootboxPurchases || []).filter((time) => now - time < fifteenHoursMs);
+        if (recentPurchases.length >= 12) {
+          const oldestPurchase = Math.min(...recentPurchases);
+          const waitTime = oldestPurchase + fifteenHoursMs - now;
+          const hours = Math.floor(waitTime / (60 * 60 * 1000));
+          const minutes = Math.floor((waitTime % (60 * 60 * 1000)) / (60 * 1000));
+          await send(ch, `⏳ You've reached your lootbox limit (12 per 15 hours). Try again in **${hours}h ${minutes}m**.`, token);
+          break;
+        }
+      }
+      
       user.balance -= item.cost;
       if (item.type === "multiplier") {
         user.multiplier = item.multiplier;
@@ -467,6 +502,7 @@ async function handleCommand(name, args, msg, token) {
         }
         user.itemInventory[loot.name] = (user.itemInventory[loot.name] || 0) + 1;
         user.totalLootboxesOpened += 1;
+        user.lootboxPurchases = (user.lootboxPurchases || []).concat(Date.now());
         awardAchievement(user, "box_opener");
         if (Object.keys(user.itemInventory).length >= 5) awardAchievement(user, "collector");
         saveUser();
@@ -554,10 +590,12 @@ async function handleCommand(name, args, msg, token) {
     }
 
     case "follow": {
-      if (!targetId) { await send(ch, `Usage: \`${PREFIX}follow @user\``, token); break; }
+      const mentioned = getMentionedUser(msg, args);
+      if (!mentioned) { await send(ch, `Usage: \`${PREFIX}follow @user\``, token); break; }
+      const targetId = mentioned.id;
+      const targetName = mentioned.username;
       if (targetId === msg.author.id) { await send(ch, "You cannot follow yourself.", token); break; }
       const targetUser = getUser(eco, targetId);
-      const targetName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
       const alreadyFollowing = user.following.includes(targetId);
       if (alreadyFollowing) {
         user.following = user.following.filter((id) => id !== targetId);
@@ -595,19 +633,36 @@ async function handleCommand(name, args, msg, token) {
 
     case "stats":
     case "fishstats": {
-      const fishCount = Object.values(user.fishInventory).reduce((sum, qty) => sum + qty, 0);
-      const itemCount = Object.values(user.itemInventory).reduce((sum, qty) => sum + qty, 0);
+      const mentioned = getMentionedUser(msg, args);
+      let targetUser = user;
+      let targetId = msg.author.id;
+      let targetName = msg.author.username;
+      
+      if (mentioned) {
+        targetId = mentioned.id;
+        targetName = mentioned.username;
+        targetUser = getUser(eco, targetId);
+      }
+      
+      const fishCount = Object.values(targetUser.fishInventory).reduce((sum, qty) => sum + qty, 0);
+      const itemCount = Object.values(targetUser.itemInventory).reduce((sum, qty) => sum + qty, 0);
+      const joinedDate = new Date(targetUser.joinedAt).toLocaleDateString();
+      const status = targetUser.blacklisted ? "🚫 Blacklisted" : targetUser.whitelisted ? "✅ Whitelisted" : "⚪ Normal User";
+      
       const lines = [
-        `📊 **${msg.author.username}**'s Stats`,
+        `📊 **${targetName}**'s Stats`,
+        `🆔 User ID: \`${targetId}\``,
+        `📅 Joined: **${joinedDate}**`,
+        `${status}`,
         "",
-        `💰 Balance: **${user.balance.toLocaleString()} sincoins**`,
-        `🎣 Total fish caught: **${user.totalFishCaught}**`,
-        `⭐ Rare or better catches: **${user.totalRareCaught}**`,
+        `💰 Balance: **${targetUser.balance.toLocaleString()} sincoins**`,
+        `🎣 Total fish caught: **${targetUser.totalFishCaught}**`,
+        `⭐ Rare or better catches: **${targetUser.totalRareCaught}**`,
         `🐟 Total fish in inventory: **${fishCount}**`,
-        `🎁 Lootboxes opened: **${user.totalLootboxesOpened}**`,
-        `🧸 Collectibles owned: **${Object.keys(user.itemInventory).length}** types (${itemCount} total)`,
-        `👥 Following: **${user.following.length}** | Followers: **${user.followers.length}**`,
-        `🏅 Achievements earned: **${user.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
+        `🎁 Lootboxes opened: **${targetUser.totalLootboxesOpened}**`,
+        `🧸 Collectibles owned: **${Object.keys(targetUser.itemInventory).length}** types (${itemCount} total)`,
+        `👥 Following: **${targetUser.following.length}** | Followers: **${targetUser.followers.length}**`,
+        `🏅 Achievements earned: **${targetUser.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
       ];
       await send(ch, lines.join("\n"), token);
       break;
@@ -640,6 +695,7 @@ async function handleCommand(name, args, msg, token) {
           `\`${PREFIX}dev resetcoins @user\` — Reset a user's coins to 0`,
           `\`${PREFIX}dev givecoins @user <amount>\` — Give coins to a user`,
           `\`${PREFIX}dev blacklist add|remove @user\` — Block or allow a user from using commands`,
+          `\`${PREFIX}dev whitelist add|remove @user\` — Whitelist a user for dev menu access`,
         ].join("\n"), token);
         break;
       }
@@ -669,6 +725,15 @@ async function handleCommand(name, args, msg, token) {
           target.blacklisted = action === "add";
           saveEconomy(eco);
           await send(ch, `✅ ${action === "add" ? "Added" : "Removed"} <@${targetId}> ${action === "add" ? "to" : "from"} the command blacklist.`, token);
+          break;
+        }
+        case "whitelist": {
+          const action = args[1]?.toLowerCase();
+          if (!["add", "remove"].includes(action) || !targetId) { await send(ch, `Usage: \`${PREFIX}dev whitelist add|remove @user\``, token); break; }
+          const target = getUser(eco, targetId);
+          target.whitelisted = action === "add";
+          saveEconomy(eco);
+          await send(ch, `✅ ${action === "add" ? "Whitelisted" : "Removed whitelist from"} <@${targetId}> for dev menu access.`, token);
           break;
         }
         default:
