@@ -27,109 +27,29 @@ const ECONOMY_FILE = path.join(__dirname, "economy.json");
 
 function loadEconomy() {
   try {
-    if (fs.existsSync(ECONOMY_FILE)) return JSON.parse(fs.readFileSync(ECONOMY_FILE, "utf-8"));
+    const data = JSON.parse(fs.readFileSync(ECONOMY_FILE, "utf-8"));
+    // Convert arrays back to Sets
+    for (const userId in data) {
+      if (data[userId].earnedAchievements) data[userId].earnedAchievements = new Set(data[userId].earnedAchievements);
+      if (data[userId].claimedAchievements) data[userId].claimedAchievements = new Set(data[userId].claimedAchievements);
+    }
+    return data;
   } catch {}
   return {};
 }
 
 function saveEconomy(data) {
-  fs.writeFileSync(ECONOMY_FILE, JSON.stringify(data, null, 2));
-}
-
-// ─── Fishing System ───────────────────────────────────────────────────────────
-const FISH_DATABASE = [
-  // Common Fish (50% catch rate)
-  { id: 1, name: "Goldfish", rarity: "Common", color: "🟡", price: 10, chance: 0.15 },
-  { id: 2, name: "Herring", rarity: "Common", color: "⚪", price: 12, chance: 0.12 },
-  { id: 3, name: "Mackerel", rarity: "Common", color: "🔵", price: 15, chance: 0.10 },
-  { id: 4, name: "Sardine", rarity: "Common", color: "⚪", price: 8, chance: 0.15 },
-  { id: 5, name: "Anchovy", rarity: "Common", color: "⚪", price: 7, chance: 0.12 },
-  { id: 6, name: "Minnow", rarity: "Common", color: "⚪", price: 5, chance: 0.18 },
-  { id: 7, name: "Bass", rarity: "Common", color: "🟩", price: 20, chance: 0.08 },
-  
-  // Uncommon Fish (30% catch rate)
-  { id: 8, name: "Salmon", rarity: "Uncommon", color: "🟧", price: 35, chance: 0.08 },
-  { id: 9, name: "Trout", rarity: "Uncommon", color: "🟨", price: 40, chance: 0.07 },
-  { id: 10, name: "Perch", rarity: "Uncommon", color: "🟧", price: 30, chance: 0.06 },
-  { id: 11, name: "Pike", rarity: "Uncommon", color: "🟩", price: 45, chance: 0.05 },
-  { id: 12, name: "Catfish", rarity: "Uncommon", color: "🟫", price: 35, chance: 0.06 },
-  { id: 13, name: "Carp", rarity: "Uncommon", color: "🟨", price: 38, chance: 0.06 },
-  { id: 14, name: "Flounder", rarity: "Uncommon", color: "🟦", price: 42, chance: 0.05 },
-  
-  // Rare Fish (12% catch rate)
-  { id: 15, name: "Tuna", rarity: "Rare", color: "🔵", price: 75, chance: 0.04 },
-  { id: 16, name: "Swordfish", rarity: "Rare", color: "🔷", price: 100, chance: 0.03 },
-  { id: 17, name: "Marlin", rarity: "Rare", color: "🔷", price: 110, chance: 0.025 },
-  { id: 18, name: "Snapper", rarity: "Rare", color: "🔴", price: 65, chance: 0.035 },
-  { id: 19, name: "Grouper", rarity: "Rare", color: "🟫", price: 70, chance: 0.03 },
-  { id: 20, name: "Halibut", rarity: "Rare", color: "⚪", price: 80, chance: 0.025 },
-  { id: 21, name: "Monkfish", rarity: "Rare", color: "🟦", price: 90, chance: 0.02 },
-  
-  // Epic Fish (6% catch rate)
-  { id: 22, name: "Dolphin Fish", rarity: "Epic", color: "🌊", price: 150, chance: 0.015 },
-  { id: 23, name: "Kingfish", rarity: "Epic", color: "🟡", price: 160, chance: 0.015 },
-  { id: 24, name: "Wahoo", rarity: "Epic", color: "🔵", price: 145, chance: 0.012 },
-  { id: 25, name: "Lionfish", rarity: "Epic", color: "🔴", price: 155, chance: 0.010 },
-  { id: 26, name: "Angelfish", rarity: "Epic", color: "🟨", price: 140, chance: 0.012 },
-  { id: 27, name: "Pufferfish", rarity: "Epic", color: "🟡", price: 170, chance: 0.008 },
-  { id: 28, name: "Moorish Idol", rarity: "Epic", color: "🟨", price: 165, chance: 0.010 },
-  
-  // Legendary Fish (2% catch rate)
-  { id: 29, name: "Golden Koi", rarity: "Legendary", color: "🟧", price: 300, chance: 0.006 },
-  { id: 30, name: "Dragon Fish", rarity: "Legendary", color: "🔴", price: 350, chance: 0.005 },
-  { id: 31, name: "Phoenix Fish", rarity: "Legendary", color: "🧡", price: 320, chance: 0.005 },
-  { id: 32, name: "Crystal Trout", rarity: "Legendary", color: "💎", price: 400, chance: 0.004 },
-  { id: 33, name: "Shadow Bass", rarity: "Legendary", color: "🟪", price: 310, chance: 0.006 },
-  { id: 34, name: "Silver Sturgeon", rarity: "Legendary", color: "⚪", price: 330, chance: 0.005 },
-  { id: 35, name: "Electric Eel", rarity: "Legendary", color: "🟨", price: 280, chance: 0.006 },
-  
-  // Mythical Fish (0.5% catch rate)
-  { id: 36, name: "Void Leviathan", rarity: "Mythical", color: "🟪", price: 1000, chance: 0.002 },
-  { id: 37, name: "Celestial Whale", rarity: "Mythical", color: "💫", price: 950, chance: 0.002 },
-  { id: 38, name: "Obsidian Serpent", rarity: "Mythical", color: "⬛", price: 900, chance: 0.0015 },
-  { id: 39, name: "Radiant Sunfish", rarity: "Mythical", color: "☀️", price: 850, chance: 0.002 },
-  { id: 40, name: "Twilight Manta", rarity: "Mythical", color: "🌙", price: 920, chance: 0.0015 },
-  { id: 41, name: "Prismatic Seahorse", rarity: "Mythical", color: "🌈", price: 1100, chance: 0.001 },
-  { id: 42, name: "Emerald Drake", rarity: "Mythical", color: "💚", price: 880, chance: 0.0015 },
-  
-  // Ultra Rare Variants (0.1% catch rate)
-  { id: 43, name: "Quantum Goldfish", rarity: "Ultra Rare", color: "⚛️", price: 2000, chance: 0.0005 },
-  { id: 44, name: "Cosmetic Carp", rarity: "Ultra Rare", color: "🌌", price: 1850, chance: 0.0005 },
-  { id: 45, name: "Interdimensional Pike", rarity: "Ultra Rare", color: "🌀", price: 1950, chance: 0.0005 },
-  { id: 46, name: "Temporal Trout", rarity: "Ultra Rare", color: "⏱️", price: 1800, chance: 0.0005 },
-  { id: 47, name: "Astral Angelfish", rarity: "Ultra Rare", color: "✨", price: 2100, chance: 0.0003 },
-  { id: 48, name: "Nebula Narwhal", rarity: "Ultra Rare", color: "🌠", price: 2200, chance: 0.0003 },
-  { id: 49, name: "Infinity Flounder", rarity: "Ultra Rare", color: "♾️", price: 2500, chance: 0.0002 },
-  { id: 50, name: "The Mythical One", rarity: "Ultra Rare", color: "👑", price: 5000, chance: 0.0001 },
-];
-
-const RARITY_COLORS = {
-  "Common": "⚪",
-  "Uncommon": "🟩",
-  "Rare": "🔵",
-  "Epic": "🟣",
-  "Legendary": "🟡",
-  "Mythical": "✨",
-  "Ultra Rare": "💎",
-};
-
-function catchFish() {
-  const random = Math.random();
-  let accumulated = 0;
-  
-  for (const fish of FISH_DATABASE) {
-    accumulated += fish.chance;
-    if (random < accumulated) {
-      return fish;
-    }
+  const toSave = {};
+  for (const userId in data) {
+    toSave[userId] = { ...data[userId] };
+    if (toSave[userId].earnedAchievements) toSave[userId].earnedAchievements = Array.from(toSave[userId].earnedAchievements);
+    if (toSave[userId].claimedAchievements) toSave[userId].claimedAchievements = Array.from(toSave[userId].claimedAchievements);
   }
-  
-  // Fallback to a common fish
-  return FISH_DATABASE[0];
+  fs.writeFileSync(ECONOMY_FILE, JSON.stringify(toSave, null, 2));
 }
 
 function getUser(data, userId) {
-  if (!data[userId]) data[userId] = { balance: 0, lastDaily: 0, streak: 0, multiplier: 1, inventory: {}, lastFish: 0 };
+  if (!data[userId]) data[userId] = { balance: 0, lastDaily: 0, streak: 0, multiplier: 1, inventory: {}, lastFish: 0, totalCaught: 0, totalSoldValue: 0, earnedAchievements: new Set(), claimedAchievements: new Set(), rareCaught: false, mythicalCaught: false, ultraRareCaught: false };
   return data[userId];
 }
 
@@ -140,6 +60,31 @@ const SHOP_ITEMS = {
   "5x":  { name: "5x Multiplier",  cost: 3000, multiplier: 5,  description: "5x your daily sincoins" },
   "10x": { name: "10x Multiplier", cost: 8000, multiplier: 10, description: "10x your daily sincoins" },
 };
+
+// ─── Achievements ─────────────────────────────────────────────────────────────
+const ACHIEVEMENTS = [
+  { id: 1, name: "First Fish", description: "Catch your first fish", condition: (user) => user.totalCaught >= 1, reward: { type: "coins", amount: 100 } },
+  { id: 2, name: "Fisherman", description: "Catch 10 fish", condition: (user) => user.totalCaught >= 10, reward: { type: "coins", amount: 500 } },
+  { id: 3, name: "Master Angler", description: "Catch 50 fish", condition: (user) => user.totalCaught >= 50, reward: { type: "coins", amount: 2000 } },
+  { id: 4, name: "Daily Devotee", description: "Claim daily 7 times in a row", condition: (user) => user.streak >= 7, reward: { type: "multiplier", amount: 2 } },
+  { id: 5, name: "Big Seller", description: "Sell fish worth 1000 sincoins total", condition: (user) => user.totalSoldValue >= 1000, reward: { type: "coins", amount: 1000 } },
+  { id: 6, name: "Wealthy Trader", description: "Sell fish worth 5000 sincoins total", condition: (user) => user.totalSoldValue >= 5000, reward: { type: "coins", amount: 2500 } },
+  { id: 7, name: "Streak Master", description: "Reach a 30-day daily streak", condition: (user) => user.streak >= 30, reward: { type: "multiplier", amount: 5 } },
+  { id: 8, name: "Rare Catch", description: "Catch a Rare or higher fish", condition: (user) => user.rareCaught, reward: { type: "coins", amount: 1500 } },
+  { id: 9, name: "Mythical Hunter", description: "Catch a Mythical fish", condition: (user) => user.mythicalCaught, reward: { type: "coins", amount: 5000 } },
+  { id: 10, name: "Ultra Rare Legend", description: "Catch an Ultra Rare fish", condition: (user) => user.ultraRareCaught, reward: { type: "multiplier", amount: 10 } },
+];
+
+function checkAchievements(user) {
+  const newAchievements = [];
+  for (const ach of ACHIEVEMENTS) {
+    if (!user.earnedAchievements.has(ach.id) && ach.condition(user)) {
+      user.earnedAchievements.add(ach.id);
+      newAchievements.push(ach);
+    }
+  }
+  return newAchievements;
+}
 
 // ─── Presence tracking ────────────────────────────────────────────────────────
 const presenceMap = new Map();
@@ -257,6 +202,10 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}shop\` — Browse the shop`,
         `\`${PREFIX}buy <item>\` — Buy an item (e.g. \`${PREFIX}buy 2x\`)`,
         "",
+        "**Achievements**",
+        `\`${PREFIX}achievements\` — View your achievements`,
+        `\`${PREFIX}claim <id>\` — Claim achievement rewards`,
+        "",
         "**Fishing**",
         `\`${PREFIX}fish\` — Catch a random fish (20s cooldown)`,
         `\`${PREFIX}inventory\` — View your caught fish`,
@@ -342,23 +291,29 @@ async function handleCommand(name, args, msg, token) {
       const fifteenHours = 15 * 60 * 60 * 1000;
       const timeSinceLast = now - user.lastDaily;
       if (timeSinceLast < fifteenHours) {
-        user.streak += 1;
-        const bonus = user.streak * 50;
-        const earned = Math.round((100 + bonus) * user.multiplier);
-        user.balance += earned;
-        user.lastDaily = now;
-        saveEconomy(eco);
         const hoursLeft = Math.floor((fifteenHours - timeSinceLast) / 3600000);
         const minsLeft = Math.floor(((fifteenHours - timeSinceLast) % 3600000) / 60000);
-        await send(ch, [`🔥 **Streak x${user.streak + 1}!** +${earned} sincoins (100 base + ${bonus} streak bonus${user.multiplier > 1 ? ` × ${user.multiplier}x multi` : ""})`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`, `⏰ Next bonus in **${hoursLeft}h ${minsLeft}m**`].join("\n"), token);
-      } else {
-        if (user.lastDaily !== 0) user.streak = 0;
-        const earned = Math.round(100 * user.multiplier);
-        user.balance += earned;
-        user.lastDaily = now;
-        saveEconomy(eco);
-        await send(ch, [`✅ **Daily claimed!** +${earned} sincoins${user.multiplier > 1 ? ` (${user.multiplier}x multiplier!)` : ""}`, `💰 Balance: **${user.balance.toLocaleString()} sincoins**`, `💡 Use \`${PREFIX}daily\` again within 15 hours for a streak bonus!`].join("\n"), token);
+        await send(ch, `⏰ You can claim your daily again in **${hoursLeft}h ${minsLeft}m**.`, token);
+        break;
       }
+      // Can claim
+      const streakWindow = 24 * 60 * 60 * 1000; // 24 hours for streak maintenance
+      if (user.lastDaily === 0 || timeSinceLast > streakWindow) {
+        user.streak = 0;
+      }
+      user.streak += 1;
+      const bonus = user.streak * 50;
+      const earned = Math.round((100 + bonus) * user.multiplier);
+      user.balance += earned;
+      user.lastDaily = now;
+      saveEconomy(eco);
+      const newAchievements = checkAchievements(user);
+      saveEconomy(eco); // Save again if achievements changed
+      let message = [`✅ **Daily claimed!** +${earned} sincoins (100 base + ${bonus} streak bonus${user.multiplier > 1 ? ` × ${user.multiplier}x multi` : ""})`, `🔥 Streak: **${user.streak}**`, `💰 Balance: **${user.balance.toLocaleString()} sincoins**`, `⏰ Next claim in 15 hours!`];
+      if (newAchievements.length > 0) {
+        message.push(`🏆 **New Achievement(s)!** ${newAchievements.map(a => a.name).join(", ")}`);
+      }
+      await send(ch, message.join("\n"), token);
       break;
     }
 
@@ -383,12 +338,56 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
-    case "owner": {
-      if (msg.author.id !== OWNER_ID) {
-        await send(ch, "This command is owner only.", token);
+    case "achievements":
+    case "ach": {
+      const eco = loadEconomy();
+      const user = getUser(eco, msg.author.id);
+      const lines = [`🏆 **${msg.author.username}'s Achievements**`, ""];
+      let earnedCount = 0;
+      for (const ach of ACHIEVEMENTS) {
+        const earned = user.earnedAchievements.has(ach.id);
+        const claimed = user.claimedAchievements.has(ach.id);
+        const status = earned ? (claimed ? "✅ Claimed" : "🏆 Earned") : "❓ Not Earned";
+        lines.push(`${status} **${ach.name}** - ${ach.description}`);
+        if (earned) earnedCount++;
+      }
+      lines.push("");
+      lines.push(`**Progress:** ${earnedCount}/${ACHIEVEMENTS.length} achievements earned`);
+      lines.push(`💡 Use \`${PREFIX}claim <id>\` to claim rewards for earned achievements!`);
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "claim": {
+      const achId = parseInt(args[0]);
+      if (!achId || isNaN(achId)) {
+        await send(ch, `Usage: \`${PREFIX}claim <achievement_id>\`\nUse \`${PREFIX}achievements\` to see IDs.`, token);
         break;
       }
-      await send(ch, "Hello, owner! You have access to this command.", token);
+      const ach = ACHIEVEMENTS.find(a => a.id === achId);
+      if (!ach) {
+        await send(ch, `❌ Achievement ID **${achId}** doesn't exist!`, token);
+        break;
+      }
+      const eco = loadEconomy();
+      const user = getUser(eco, msg.author.id);
+      if (!user.earnedAchievements.has(achId)) {
+        await send(ch, `❌ You haven't earned **${ach.name}** yet!`, token);
+        break;
+      }
+      if (user.claimedAchievements.has(achId)) {
+        await send(ch, `❌ You already claimed the reward for **${ach.name}**!`, token);
+        break;
+      }
+      user.claimedAchievements.add(achId);
+      if (ach.reward.type === "coins") {
+        user.balance += ach.reward.amount;
+        await send(ch, `✅ Claimed reward for **${ach.name}**! +${ach.reward.amount.toLocaleString()} sincoins\n💰 New balance: **${user.balance.toLocaleString()} sincoins**`, token);
+      } else if (ach.reward.type === "multiplier") {
+        user.multiplier = Math.max(user.multiplier, ach.reward.amount);
+        await send(ch, `✅ Claimed reward for **${ach.name}**! Multiplier upgraded to **${user.multiplier}x**!`, token);
+      }
+      saveEconomy(eco);
       break;
     }
 
@@ -409,13 +408,29 @@ async function handleCommand(name, args, msg, token) {
       if (!user.inventory) user.inventory = {};
       if (!user.inventory[caughtFish.id]) user.inventory[caughtFish.id] = 0;
       user.inventory[caughtFish.id] += 1;
+      user.totalCaught += 1;
       user.lastFish = now;
+      
+      // Check rarity
+      const rarity = caughtFish.rarity;
+      if (rarity === "Rare" || rarity === "Epic" || rarity === "Legendary" || rarity === "Mythical" || rarity === "Ultra Rare") {
+        if (rarity === "Rare" || rarity === "Epic") user.rareCaught = true;
+        if (rarity === "Mythical") user.mythicalCaught = true;
+        if (rarity === "Ultra Rare") user.ultraRareCaught = true;
+      }
+      
+      saveEconomy(eco);
+      const newAchievements = checkAchievements(user);
       saveEconomy(eco);
       
       const fishEmoji = caughtFish.color;
       const rarityEmoji = RARITY_COLORS[caughtFish.rarity] || "❓";
       
-      await send(ch, `${fishEmoji} **You caught a ${caughtFish.rarity} ${caughtFish.name}!** ${rarityEmoji}\n💰 Worth **${caughtFish.price.toLocaleString()} sincoins**\n📊 You now have **${user.inventory[caughtFish.id]}** ${caughtFish.name}(s)`, token);
+      let message = `${fishEmoji} **You caught a ${caughtFish.rarity} ${caughtFish.name}!** ${rarityEmoji}\n💰 Worth **${caughtFish.price.toLocaleString()} sincoins**\n📊 You now have **${user.inventory[caughtFish.id]}** ${caughtFish.name}(s)`;
+      if (newAchievements.length > 0) {
+        message += `\n🏆 **New Achievement(s)!** ${newAchievements.map(a => a.name).join(", ")}`;
+      }
+      await send(ch, message, token);
       break;
     }
 
@@ -481,47 +496,17 @@ async function handleCommand(name, args, msg, token) {
       user.inventory[fishId] -= quantity;
       if (user.inventory[fishId] <= 0) delete user.inventory[fishId];
       user.balance += totalValue;
+      user.totalSoldValue += totalValue;
+      saveEconomy(eco);
+      const newAchievements = checkAchievements(user);
       saveEconomy(eco);
       
       const pluralS = quantity > 1 ? "s" : "";
-      await send(ch, `${fish.color} **Sold ${quantity}x ${fish.name}${pluralS}** for **${totalValue.toLocaleString()} sincoins**!\n💰 New balance: **${user.balance.toLocaleString()} sincoins**`, token);
-      break;
-    }
-
-    case "nsfw": {
-      const tag = args[0]?.toLowerCase();
-      if (!tag) {
-        await send(ch, `Usage: \`${PREFIX}nsfw <tag>\`\nAllowed tags: ${[...HIDDEN_NSFW_TAGS].join(", ")}`, token);
-        break;
+      let message = `${fish.color} **Sold ${quantity}x ${fish.name}${pluralS}** for **${totalValue.toLocaleString()} sincoins**!\n💰 New balance: **${user.balance.toLocaleString()} sincoins**`;
+      if (newAchievements.length > 0) {
+        message += `\n🏆 **New Achievement(s)!** ${newAchievements.map(a => a.name).join(", ")}`;
       }
-
-      if (!HIDDEN_NSFW_TAGS.has(tag)) {
-        await send(ch, `❌ Unknown or unsupported tag. Allowed tags: ${[...HIDDEN_NSFW_TAGS].join(", ")}`, token);
-        break;
-      }
-
-      const apiUrl = `https://rule34.xxx/index.php?page=dapi&s=post&q=index&json=1&tags=${encodeURIComponent(tag)}`;
-      let posts;
-
-      try {
-        posts = await fetchJson(apiUrl);
-      } catch (err) {
-        await send(ch, `❌ Failed to fetch NSFW content. Try again later.`, token);
-        break;
-      }
-
-      if (!Array.isArray(posts) || posts.length === 0) {
-        await send(ch, `❌ No images found for tag **${tag}**.`, token);
-        break;
-      }
-
-      const post = posts[Math.floor(Math.random() * posts.length)];
-      if (!post?.file_url) {
-        await send(ch, `❌ Unexpected API response while fetching the image.`, token);
-        break;
-      }
-
-      await send(ch, `🔞 **Random ${tag} image**: ${post.file_url}`, token);
+      await send(ch, message, token);
       break;
     }
 
@@ -620,7 +605,7 @@ async function startBot(token, selfId) {
 
     ws.on("error", (err) => console.error("[Gateway] Error:", err.message));
   }
-                                                                                                                                                                                                                                                                                                       
+
   connect();
 }
 
