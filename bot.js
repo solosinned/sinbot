@@ -24,6 +24,135 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── Economy storage ──────────────────────────────────────────────────────────
 const ECONOMY_FILE = path.join(__dirname, "economy.json");
+const ALT_PREFIX = "!";
+const FISH_COOLDOWN_MS = 20 * 1000;
+
+const FISH_RARITY_BOOST = {
+  common: 0,
+  uncommon: 0.25,
+  rare: 0.75,
+  epic: 1.5,
+  legendary: 3,
+};
+
+const ACHIEVEMENTS = {
+  first_fish: { name: "First Catch", description: "Catch your first fish." },
+  first_sell: { name: "First Sale", description: "Sell a fish or item for the first time." },
+  box_opener: { name: "Box Opener", description: "Open your first lootbox." },
+  fish_master: { name: "Fish Master", description: "Catch a rare or better fish." },
+  collector: { name: "Collector", description: "Collect 5 different anime items." },
+  rich_1k: { name: "One Thousand", description: "Reach 1,000 sincoins." },
+  follow_friend: { name: "Follower", description: "Follow another user." },
+};
+
+const FISH_ITEMS = [
+  { name: "Blue Minnow", rarity: "common", price: 15, weight: 35 },
+  { name: "River Perch", rarity: "common", price: 20, weight: 34 },
+  { name: "Pond Sunfish", rarity: "common", price: 18, weight: 33 },
+  { name: "Silver Shiner", rarity: "common", price: 22, weight: 32 },
+  { name: "Brown Bullhead", rarity: "common", price: 24, weight: 31 },
+  { name: "Grass Carp", rarity: "common", price: 28, weight: 30 },
+  { name: "Stream Chub", rarity: "common", price: 16, weight: 29 },
+  { name: "Crappie", rarity: "common", price: 26, weight: 28 },
+  { name: "Whitefish", rarity: "common", price: 30, weight: 27 },
+  { name: "Mudcat", rarity: "common", price: 21, weight: 26 },
+  { name: "Sucker", rarity: "common", price: 19, weight: 25 },
+  { name: "Redfin", rarity: "common", price: 23, weight: 24 },
+  { name: "Shad", rarity: "common", price: 17, weight: 23 },
+  { name: "Dace", rarity: "common", price: 20, weight: 22 },
+  { name: "Gudgeon", rarity: "common", price: 14, weight: 21 },
+  { name: "Stream Trout", rarity: "common", price: 34, weight: 20 },
+  { name: "Pond Catfish", rarity: "common", price: 32, weight: 19 },
+  { name: "Bluegill", rarity: "common", price: 18, weight: 18 },
+  { name: "Smallmouth Bass", rarity: "common", price: 38, weight: 17 },
+  { name: "Golden Dace", rarity: "common", price: 40, weight: 16 },
+  { name: "Rainbow Trout", rarity: "uncommon", price: 70, weight: 15 },
+  { name: "Silver Pike", rarity: "uncommon", price: 82, weight: 14 },
+  { name: "Lake Eel", rarity: "uncommon", price: 94, weight: 13 },
+  { name: "Crimson Koi", rarity: "uncommon", price: 88, weight: 12 },
+  { name: "Mirror Carp", rarity: "uncommon", price: 65, weight: 11 },
+  { name: "Black Bullhead", rarity: "uncommon", price: 75, weight: 10 },
+  { name: "Mudfish", rarity: "uncommon", price: 80, weight: 9 },
+  { name: "Tiger Trout", rarity: "uncommon", price: 90, weight: 8 },
+  { name: "Crystal Char", rarity: "uncommon", price: 100, weight: 7 },
+  { name: "Sunset Salmon", rarity: "uncommon", price: 110, weight: 6 },
+  { name: "King Salmon", rarity: "rare", price: 160, weight: 5 },
+  { name: "Moonlight Carp", rarity: "rare", price: 180, weight: 4.5 },
+  { name: "Azure Sturgeon", rarity: "rare", price: 200, weight: 4 },
+  { name: "Nightmare Eel", rarity: "rare", price: 220, weight: 3.5 },
+  { name: "Phantom Perch", rarity: "rare", price: 240, weight: 3 },
+  { name: "Golden Koi", rarity: "rare", price: 260, weight: 2.5 },
+  { name: "Storm Bass", rarity: "rare", price: 280, weight: 2 },
+  { name: "Frost Pike", rarity: "rare", price: 300, weight: 1.7 },
+  { name: "Celestial Trout", rarity: "rare", price: 320, weight: 1.5 },
+  { name: "Void Wyrm", rarity: "epic", price: 450, weight: 1.2 },
+  { name: "Aurora Salmon", rarity: "epic", price: 480, weight: 1.0 },
+  { name: "Thunder Carp", rarity: "epic", price: 520, weight: 0.8 },
+  { name: "Dragon Pike", rarity: "epic", price: 560, weight: 0.6 },
+  { name: "Sunflare Grouper", rarity: "epic", price: 600, weight: 0.5 },
+  { name: "Legendary Leviathan", rarity: "legendary", price: 1200, weight: 0.2 },
+  { name: "Mythic Oceanus", rarity: "legendary", price: 1800, weight: 0.1 },
+];
+
+const COLLECTIBLE_ITEMS = [
+  { name: "Dragon Ball", rarity: "legendary", price: 3500 },
+  { name: "Stand Arrow", rarity: "legendary", price: 3200 },
+  { name: "Cursed Technique Scroll", rarity: "epic", price: 1500 },
+  { name: "Rasengan Scroll", rarity: "rare", price: 900 },
+  { name: "Sharingan Shard", rarity: "epic", price: 1400 },
+  { name: "Hollow Mask Fragment", rarity: "rare", price: 850 },
+  { name: "Nen Beads", rarity: "rare", price: 920 },
+  { name: "Devil Fruit", rarity: "legendary", price: 3400 },
+  { name: "Bankai Shard", rarity: "rare", price: 950 },
+  { name: "Spirit Bomb Orb", rarity: "epic", price: 1600 },
+  { name: "Death Note", rarity: "epic", price: 1700 },
+  { name: "Zanpakuto Seal", rarity: "rare", price: 980 },
+  { name: "Phantom Troupe Card", rarity: "rare", price: 890 },
+  { name: "Cursed Mark Tattoo", rarity: "uncommon", price: 550 },
+  { name: "Stand Disc", rarity: "epic", price: 1450 },
+  { name: "Jutsu Kunai", rarity: "common", price: 220 },
+  { name: "Kamehameha Coin", rarity: "uncommon", price: 420 },
+  { name: "Curse Tech Gadget", rarity: "rare", price: 870 },
+  { name: "Mystic Seal Tattoo", rarity: "uncommon", price: 520 },
+  { name: "Soul Gem", rarity: "epic", price: 1550 },
+  { name: "Explorer's Map", rarity: "common", price: 180 },
+  { name: "Spirit Stone", rarity: "uncommon", price: 480 },
+  { name: "Legend Key", rarity: "legendary", price: 3600 },
+];
+
+const LOOTBOXES = {
+  "starterbox": { name: "Starter Box", cost: 200, tier: "common", description: "A simple box with common anime items." },
+  "bronzebox": { name: "Bronze Box", cost: 450, tier: "common", description: "Still common, but better than a starter box." },
+  "silverbox": { name: "Silver Box", cost: 900, tier: "uncommon", description: "Uncommon items with a chance for rare finds." },
+  "goldbox": { name: "Gold Box", cost: 1700, tier: "rare", description: "A rare lootbox with strong collectibles." },
+  "dragonbox": { name: "Dragon Box", cost: 2600, tier: "rare", description: "High chance for powerful anime artifacts." },
+  "mysterybox": { name: "Mystery Box", cost: 1200, tier: "uncommon", description: "Mystery items from many anime worlds." },
+  "arcadebox": { name: "Arcade Box", cost: 750, tier: "common", description: "Fun items for collectors." },
+  "mythicbox": { name: "Mythic Box", cost: 3200, tier: "epic", description: "Epic anime items and rare rewards." },
+  "legendbox": { name: "Legend Box", cost: 5200, tier: "legendary", description: "A legendary lootbox with top-tier items." },
+  "cursebox": { name: "Curse Box", cost: 2100, tier: "rare", description: "Strange cursed items inside." },
+  "shinobibox": { name: "Shinobi Box", cost: 1800, tier: "rare", description: "Ninja-themed collectibles." },
+  "standbox": { name: "Stand Box", cost: 2500, tier: "epic", description: "Stand user treasures and artifacts." },
+  "dragonballbox": { name: "Dragon Ball Box", cost: 3300, tier: "epic", description: "Dragon Ball-themed rare items." },
+  "spiritbox": { name: "Spirit Box", cost: 1400, tier: "uncommon", description: "Spiritual anime supplies." },
+  "devilbox": { name: "Devil Fruit Box", cost: 4500, tier: "legendary", description: "Chance to get a Devil Fruit or legendary item." },
+  "questbox": { name: "Quest Box", cost: 950, tier: "uncommon", description: "Adventurer items and collectibles." },
+  "hunterbox": { name: "Hunter Box", cost: 1900, tier: "rare", description: "Hunter-themed rare memorabilia." },
+  "ninjabox": { name: "Ninja Box", cost: 2300, tier: "epic", description: "High-tier ninja artifacts." },
+  "shadowbox": { name: "Shadow Box", cost: 2800, tier: "epic", description: "Items of hidden power." },
+  "worldbox": { name: "World Box", cost: 6100, tier: "legendary", description: "A world-class lootbox with top rarities." },
+};
+
+const SHOP_ITEMS = {
+  "2x":  { name: "2x Multiplier",  cost: 500,  type: "multiplier",  multiplier: 2,  description: "Doubles your daily sincoins." },
+  "3x":  { name: "3x Multiplier",  cost: 1500, type: "multiplier",  multiplier: 3,  description: "Triples your daily sincoins." },
+  "5x":  { name: "5x Multiplier",  cost: 3000, type: "multiplier",  multiplier: 5,  description: "5x your daily sincoins." },
+  "10x": { name: "10x Multiplier", cost: 8000, type: "multiplier",  multiplier: 10, description: "10x your daily sincoins." },
+  "betterbait": { name: "Better Bait", cost: 2000, type: "upgrade", upgrade: { fishLuck: 0.5 }, description: "Improve fishing odds for rarer fish." },
+  "anglerrod": { name: "Angler Rod", cost: 5000, type: "upgrade", upgrade: { fishLuck: 1 }, description: "Greatly increase your chance at rarer fish." },
+  "lureking": { name: "Lure King", cost: 12000, type: "upgrade", upgrade: { fishLuck: 2 }, description: "Massively boost rare fish odds." },
+  ...Object.fromEntries(Object.entries(LOOTBOXES).map(([key, box]) => [key, { name: box.name, cost: box.cost, type: "lootbox", boxTier: box.tier, description: box.description }])),
+};
 
 function loadEconomy() {
   try {
@@ -37,17 +166,87 @@ function saveEconomy(data) {
 }
 
 function getUser(data, userId) {
-  if (!data[userId]) data[userId] = { balance: 0, lastDaily: 0, streak: 0, multiplier: 1 };
+  if (!data[userId]) {
+    data[userId] = {
+      balance: 0,
+      lastDaily: 0,
+      streak: 0,
+      multiplier: 1,
+      fishInventory: {},
+      itemInventory: {},
+      fishCooldown: 0,
+      upgrades: { fishLuck: 0 },
+      achievements: [],
+      followers: [],
+      following: [],
+      blacklisted: false,
+      totalFishCaught: 0,
+      totalRareCaught: 0,
+      totalFishSold: 0,
+      totalItemsSold: 0,
+      totalLootboxesOpened: 0,
+    };
+  }
   return data[userId];
 }
 
-// ─── Shop ─────────────────────────────────────────────────────────────────────
-const SHOP_ITEMS = {
-  "2x":  { name: "2x Multiplier",  cost: 500,  multiplier: 2,  description: "Doubles your daily sincoins" },
-  "3x":  { name: "3x Multiplier",  cost: 1500, multiplier: 3,  description: "Triples your daily sincoins" },
-  "5x":  { name: "5x Multiplier",  cost: 3000, multiplier: 5,  description: "5x your daily sincoins" },
-  "10x": { name: "10x Multiplier", cost: 8000, multiplier: 10, description: "10x your daily sincoins" },
-};
+function weightedRandom(items) {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  let roll = Math.random() * total;
+  for (const item of items) {
+    roll -= item.weight;
+    if (roll <= 0) return item;
+  }
+  return items[items.length - 1];
+}
+
+function formatDuration(ms) {
+  const seconds = Math.ceil(ms / 1000);
+  return `${seconds}s`;
+}
+
+function getFishPool(user) {
+  return FISH_ITEMS.map((fish) => {
+    const bonus = (user.upgrades?.fishLuck ?? 0) * FISH_RARITY_BOOST[fish.rarity];
+    return { ...fish, weight: fish.weight + bonus };
+  });
+}
+
+function awardAchievement(user, key) {
+  if (!ACHIEVEMENTS[key] || user.achievements.includes(key)) return false;
+  user.achievements.push(key);
+  return true;
+}
+
+function getAchievementStatus(user) {
+  return Object.entries(ACHIEVEMENTS).map(([key, meta]) => `${user.achievements.includes(key) ? "✅" : "🔒"} ${meta.name} — ${meta.description}`);
+}
+
+function resolveUserId(args, msg) {
+  const mentionId = getMentionedId(args);
+  if (mentionId) return mentionId;
+  if (args[0] && /^[0-9]+$/.test(args[0])) return args[0];
+  return null;
+}
+
+function findInventoryKey(inventory, search) {
+  return Object.keys(inventory).find((key) => key.toLowerCase() === search.toLowerCase());
+}
+
+function openLootbox(boxKey) {
+  const box = LOOTBOXES[boxKey];
+  if (!box) return null;
+  const rarityPools = {
+    common: ["common", "uncommon"],
+    uncommon: ["common", "uncommon", "rare"],
+    rare: ["uncommon", "rare", "epic"],
+    epic: ["rare", "epic", "legendary"],
+    legendary: ["epic", "legendary"],
+  };
+  const allowedRarities = rarityPools[box.tier] ?? ["common", "uncommon", "rare", "epic", "legendary"];
+  const pool = COLLECTIBLE_ITEMS.filter((item) => allowedRarities.includes(item.rarity)).map((item) => ({ ...item, weight: { common: 50, uncommon: 30, rare: 12, epic: 6, legendary: 2 }[item.rarity] || 1 }));
+  return weightedRandom(pool);
+}
 
 // ─── Presence tracking ────────────────────────────────────────────────────────
 const presenceMap = new Map();
@@ -77,11 +276,6 @@ function apiRequest(method, urlPath, body, token) {
 }
 
 // ─── Mention parsing ──────────────────────────────────────────────────────────
-function parseMention(text) {
-  const match = text.match(/^<@!?(\d+)>$/);
-  return match ? match[1] : null;
-}
-
 function getMentionedId(args) {
   for (const arg of args) { const id = parseMention(arg.trim()); if (id) return id; }
   return null;
@@ -97,29 +291,6 @@ function calculate(expr) {
     const rounded = Math.round(result * 1e10) / 1e10;
     return `${expr.replace(/[×x]/gi, "×").replace(/\^/g, "^")} = **${rounded}**`;
   } catch { return "Could not calculate that expression."; }
-}
-
-const FRIEND_RESPONSES = {
-  kryy: "kryy? fuck that guy",
-  acid: "acid? fuck that guy",
-  teto: "teto? fuck that guy",
-  wil: "wil? i lovee him",
-  hbn: "hbn? talking about my husband?",
-  beatrice: "beatrice? sounds like a femboy",
-  dark: "dark? another femboy i presume..",
-  frosty: "frosty? dont even joke lad.",
-  orion: "orion? hes so auraful",
-  stormi: "stormi? also so auraful",
-  pizzard: "pizzard? pizza.",
-};
-
-function getFriendResponse(text) {
-  const normalized = text.toLowerCase();
-  for (const [name, response] of Object.entries(FRIEND_RESPONSES)) {
-    const regex = new RegExp(`\\b${name}\\b`, "i");
-    if (regex.test(normalized)) return response;
-  }
-  return null;
 }
 
 // ─── Login ────────────────────────────────────────────────────────────────────
@@ -138,6 +309,15 @@ async function send(channelId, content, token) {
 // ─── Command handlers ─────────────────────────────────────────────────────────
 async function handleCommand(name, args, msg, token) {
   const ch = msg.channel_id;
+  const eco = loadEconomy();
+  const user = getUser(eco, msg.author.id);
+  const text = args.join(" ").trim();
+  const targetId = resolveUserId(args, msg);
+
+  function saveUser() {
+    if (user.balance >= 1000) awardAchievement(user, "rich_1k");
+    saveEconomy(eco);
+  }
 
   switch (name) {
     case "ping":
@@ -163,10 +343,19 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}daily\` — Claim your daily sincoins`,
         `\`${PREFIX}balance\` — Check your sincoins`,
         `\`${PREFIX}shop\` — Browse the shop`,
-        `\`${PREFIX}buy <item>\` — Buy an item (e.g. \`${PREFIX}buy 2x\`)`,
+        `\`${PREFIX}buy <item>\` — Buy multipliers, upgrades, or lootboxes`,
         "",
-        "**Owner**",
-        `\`${PREFIX}owner\` — Owner only command`,
+        "**Fishing & Inventory**",
+        `\`${PREFIX}fish\` — Try to catch a fish (20s cooldown)`,
+        `\`${PREFIX}inventory\` — See your fish and collectible items`,
+        `\`${PREFIX}sell <fish/item name>\` — Sell a fish or collectible`,
+        `\`${PREFIX}achievements\` — View your earned achievements`,
+        `\`${PREFIX}stats\` — See your fishing and collectible stats`,
+        `\`${PREFIX}leaderboard\` — View the top sincoin holders`,
+        `\`${PREFIX}follow @user\` — Follow another user`,
+        "",
+        "**Developer**",
+        `\`${PREFIX}dev\` — Owner only dev menu`,
       ].join("\n"), token);
       break;
 
@@ -176,7 +365,7 @@ async function handleCommand(name, args, msg, token) {
 
     case "calc":
     case "calculate": {
-      const expr = args.join(" ");
+      const expr = text;
       if (!expr) { await send(ch, `Usage: \`${PREFIX}calc 5x3\``, token); break; }
       await send(ch, calculate(expr), token);
       break;
@@ -184,7 +373,6 @@ async function handleCommand(name, args, msg, token) {
 
     case "fakeban":
     case "ban": {
-      const targetId = getMentionedId(args);
       const targetName = targetId ? (msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`) : args.join(" ") || "that user";
       const mention = targetId ? `<@${targetId}>` : targetName;
       await send(ch, `🔨 **${mention}** has been banned from the server.\n> *Reason: violating community rules.*`, token);
@@ -193,7 +381,6 @@ async function handleCommand(name, args, msg, token) {
 
     case "status":
     case "online": {
-      const targetId = getMentionedId(args);
       if (!targetId) { await send(ch, `Usage: \`${PREFIX}status @user\``, token); break; }
       const status = presenceMap.get(targetId);
       const targetName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
@@ -208,7 +395,7 @@ async function handleCommand(name, args, msg, token) {
 
     case "ai":
     case "ask": {
-      const question = args.join(" ");
+      const question = text;
       if (!question) { await send(ch, `Usage: \`${PREFIX}ai <question>\``, token); break; }
       await send(ch, "🤔 Thinking...", token);
       try {
@@ -231,39 +418,45 @@ async function handleCommand(name, args, msg, token) {
     case "balance":
     case "bal":
     case "coins": {
-      const eco = loadEconomy();
-      const user = getUser(eco, msg.author.id);
       const mult = user.multiplier > 1 ? ` (${user.multiplier}x multiplier active)` : "";
-      await send(ch, `💰 **${msg.author.username}** has **${user.balance.toLocaleString()} sincoins**${mult}`, token);
+      const fishLuckDesc = user.upgrades?.fishLuck ? ` | Fishing bonus: +${user.upgrades.fishLuck} rare odds` : "";
+      await send(ch, `💰 **${msg.author.username}** has **${user.balance.toLocaleString()} sincoins**${mult}${fishLuckDesc}`, token);
       break;
     }
 
     case "daily": {
-      const eco = loadEconomy();
-      const user = getUser(eco, msg.author.id);
       const now = Date.now();
       const fifteenHours = 15 * 60 * 60 * 1000;
       const timeSinceLast = now - user.lastDaily;
-      if (timeSinceLast >= fifteenHours) {
+      if (timeSinceLast < fifteenHours) {
         user.streak += 1;
         const bonus = user.streak * 50;
         const earned = Math.round((100 + bonus) * user.multiplier);
         user.balance += earned;
         user.lastDaily = now;
-        saveEconomy(eco);
-        await send(ch, [`🔥 **Streak x${user.streak}!** +${earned} sincoins (100 base + ${bonus} streak bonus${user.multiplier > 1 ? ` × ${user.multiplier}x multi` : ""})`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`, `⏰ Next daily available in 15 hours.`].join("\n"), token);
-      } else {
+        saveUser();
         const hoursLeft = Math.floor((fifteenHours - timeSinceLast) / 3600000);
         const minsLeft = Math.floor(((fifteenHours - timeSinceLast) % 3600000) / 60000);
-        await send(ch, `⏰ You can claim your daily again in **${hoursLeft}h ${minsLeft}m**.`, token);
+        await send(ch, [`🔥 **Streak x${user.streak + 1}!** +${earned} sincoins (100 base + ${bonus} streak bonus${user.multiplier > 1 ? ` × ${user.multiplier}x multi` : ""})`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`, `⏰ Next bonus in **${hoursLeft}h ${minsLeft}m**`].join("\n"), token);
+      } else {
+        if (user.lastDaily !== 0) user.streak = 0;
+        const earned = Math.round(100 * user.multiplier);
+        user.balance += earned;
+        user.lastDaily = now;
+        saveUser();
+        await send(ch, [`✅ **Daily claimed!** +${earned} sincoins${user.multiplier > 1 ? ` (${user.multiplier}x multiplier!)` : ""}`, `💰 Balance: **${user.balance.toLocaleString()} sincoins**`, `💡 Use \`${PREFIX}daily\` again within 15 hours for a streak bonus!`].join("\n"), token);
       }
       break;
     }
 
     case "shop": {
-      const eco = loadEconomy();
-      const user = getUser(eco, msg.author.id);
-      await send(ch, [`🛒 **Sincoin Shop** | Balance: **${user.balance.toLocaleString()} sincoins**`, "", ...Object.entries(SHOP_ITEMS).map(([key, item]) => `\`${PREFIX}buy ${key}\` — **${item.name}** — ${item.cost.toLocaleString()} sincoins\n  › ${item.description}`), "", `*Multipliers affect \`${PREFIX}daily\` earnings.*`].join("\n"), token);
+      const lines = [`🛒 **Sincoin Shop** | Balance: **${user.balance.toLocaleString()} sincoins**`, "", ...Object.entries(SHOP_ITEMS).map(([key, item]) => {
+        const price = item.cost.toLocaleString();
+        const label = item.type === "lootbox" ? "Lootbox" : item.type === "upgrade" ? "Upgrade" : item.type === "multiplier" ? "Multiplier" : "Item";
+        return `\`${PREFIX}buy ${key}\` — **${item.name}** — ${price} sincoins (${label})\n  › ${item.description}`;
+      })];
+      lines.push("", `*Multipliers affect \`${PREFIX}daily\` earnings.*`, `*Lootboxes open items instantly when purchased.*`);
+      await send(ch, lines.join("\n"), token);
       break;
     }
 
@@ -271,13 +464,232 @@ async function handleCommand(name, args, msg, token) {
       const itemKey = args[0]?.toLowerCase();
       if (!itemKey || !SHOP_ITEMS[itemKey]) { await send(ch, `❌ Unknown item. Use \`${PREFIX}shop\` to see available items.`, token); break; }
       const item = SHOP_ITEMS[itemKey];
-      const eco = loadEconomy();
-      const user = getUser(eco, msg.author.id);
       if (user.balance < item.cost) { await send(ch, `❌ You need **${item.cost.toLocaleString()} sincoins** but only have **${user.balance.toLocaleString()}**.`, token); break; }
       user.balance -= item.cost;
-      user.multiplier = item.multiplier;
-      saveEconomy(eco);
-      await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 Your daily earnings are now **${item.multiplier}x**!`].join("\n"), token);
+      if (item.type === "multiplier") {
+        user.multiplier = item.multiplier;
+        saveUser();
+        await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 Your daily earnings are now **${user.multiplier}x**!`].join("\n"), token);
+      } else if (item.type === "upgrade") {
+        Object.entries(item.upgrade).forEach(([key, value]) => { user.upgrades[key] = (user.upgrades[key] || 0) + value; });
+        saveUser();
+        await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `✨ Your fishing odds for rarer fish have improved!`].join("\n"), token);
+      } else if (item.type === "lootbox") {
+        const loot = openLootbox(itemKey);
+        if (!loot) {
+          await send(ch, `❌ Something went wrong opening **${item.name}**.`, token);
+          break;
+        }
+        user.itemInventory[loot.name] = (user.itemInventory[loot.name] || 0) + 1;
+        user.totalLootboxesOpened += 1;
+        awardAchievement(user, "box_opener");
+        if (Object.keys(user.itemInventory).length >= 5) awardAchievement(user, "collector");
+        saveUser();
+        await send(ch, [`📦 Opened **${item.name}**!`, `🎁 You found **${loot.name}** (${loot.rarity})`, `💰 Item value: **${loot.price.toLocaleString()} sincoins**`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
+      }
+      break;
+    }
+
+    case "fish": {
+      const now = Date.now();
+      if (now < user.fishCooldown + FISH_COOLDOWN_MS) {
+        const wait = (user.fishCooldown + FISH_COOLDOWN_MS) - now;
+        await send(ch, `⏳ You need to wait ${formatDuration(wait)} before fishing again.`, token);
+        break;
+      }
+      const caught = weightedRandom(getFishPool(user));
+      user.fishInventory[caught.name] = (user.fishInventory[caught.name] || 0) + 1;
+      user.fishCooldown = now;
+      user.totalFishCaught += 1;
+      if (["rare", "epic", "legendary"].includes(caught.rarity)) {
+        user.totalRareCaught += 1;
+        awardAchievement(user, "fish_master");
+      }
+      awardAchievement(user, "first_fish");
+      saveUser();
+      await send(ch, [`🎣 **${msg.author.username}** caught a **${caught.rarity}** fish: **${caught.name}**!`, `💰 Value: **${caught.price.toLocaleString()} sincoins**`, `⏳ Cooldown: **20s**`, `📦 Use \`${PREFIX}inventory\` to view your fish and items.`].join("\n"), token);
+      break;
+    }
+
+    case "sell": {
+      if (!text) { await send(ch, `Usage: \`${PREFIX}sell <fish or item name>\``, token); break; }
+      const fishKey = findInventoryKey(user.fishInventory, text);
+      const itemKey = fishKey ? null : findInventoryKey(user.itemInventory, text);
+      if (!fishKey && !itemKey) { await send(ch, `❌ You do not have any fish or items named **${text}**. Use \`${PREFIX}inventory\` to see your collection.`, token); break; }
+      if (fishKey) {
+        const caught = FISH_ITEMS.find((fish) => fish.name === fishKey);
+        const amount = caught?.price ?? 0;
+        user.fishInventory[fishKey] -= 1;
+        if (user.fishInventory[fishKey] <= 0) delete user.fishInventory[fishKey];
+        user.balance += amount;
+        user.totalFishSold += 1;
+        awardAchievement(user, "first_sell");
+        saveUser();
+        await send(ch, [`💸 Sold **1x ${fishKey}** for **${amount.toLocaleString()} sincoins**.`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
+        break;
+      }
+      if (itemKey) {
+        const itemInfo = COLLECTIBLE_ITEMS.find((item) => item.name === itemKey);
+        const amount = itemInfo?.price ?? 0;
+        user.itemInventory[itemKey] -= 1;
+        if (user.itemInventory[itemKey] <= 0) delete user.itemInventory[itemKey];
+        user.balance += amount;
+        user.totalItemsSold += 1;
+        awardAchievement(user, "first_sell");
+        saveUser();
+        await send(ch, [`💸 Sold **1x ${itemKey}** for **${amount.toLocaleString()} sincoins**.`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
+        break;
+      }
+      break;
+    }
+
+    case "inventory":
+    case "inv": {
+      const fishLines = Object.entries(user.fishInventory).map(([name, count]) => {
+        const fishInfo = FISH_ITEMS.find((fish) => fish.name === name);
+        return `• **${name}** x${count} (${fishInfo?.rarity ?? "unknown"}, ${fishInfo?.price?.toLocaleString() ?? "0"} sincoins each)`;
+      });
+      const itemLines = Object.entries(user.itemInventory).map(([name, count]) => {
+        const itemInfo = COLLECTIBLE_ITEMS.find((item) => item.name === name);
+        return `• **${name}** x${count} (${itemInfo?.rarity ?? "unknown"}, ${itemInfo?.price?.toLocaleString() ?? "0"} sincoins each)`;
+      });
+      const lines = [
+        `📦 **${msg.author.username}**'s Inventory`,
+        "",
+        `**Fish** (${fishLines.length} types)`,
+        fishLines.length ? fishLines.join("\n") : "• No fish caught yet.",
+        "",
+        `**Collectibles** (${itemLines.length} types)`,
+        itemLines.length ? itemLines.join("\n") : "• No anime items yet.",
+        "",
+        `💰 Balance: **${user.balance.toLocaleString()} sincoins**`,
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "follow": {
+      if (!targetId) { await send(ch, `Usage: \`${PREFIX}follow @user\``, token); break; }
+      if (targetId === msg.author.id) { await send(ch, "You cannot follow yourself.", token); break; }
+      const targetUser = getUser(eco, targetId);
+      const targetName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
+      const alreadyFollowing = user.following.includes(targetId);
+      if (alreadyFollowing) {
+        user.following = user.following.filter((id) => id !== targetId);
+        targetUser.followers = targetUser.followers.filter((id) => id !== msg.author.id);
+        saveUser();
+        await send(ch, `👋 You unfollowed **${targetName}**.`, token);
+      } else {
+        user.following.push(targetId);
+        targetUser.followers.push(msg.author.id);
+        awardAchievement(user, "follow_friend");
+        saveUser();
+        saveEconomy(eco);
+        await send(ch, `✅ You are now following **${targetName}**!`, token);
+      }
+      break;
+    }
+
+    case "followers": {
+      const target = targetId ? getUser(eco, targetId) : user;
+      const count = target.followers?.length ?? 0;
+      await send(ch, `👥 **${targetId ? `<@${targetId}>` : msg.author.username}** has **${count} follower(s)**.`, token);
+      if (targetId) saveEconomy(eco);
+      break;
+    }
+
+    case "achievements": {
+      const lines = [
+        `🏆 **${msg.author.username}**'s Achievements`,
+        "",
+        ...getAchievementStatus(user),
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "stats":
+    case "fishstats": {
+      const fishCount = Object.values(user.fishInventory).reduce((sum, qty) => sum + qty, 0);
+      const itemCount = Object.values(user.itemInventory).reduce((sum, qty) => sum + qty, 0);
+      const lines = [
+        `📊 **${msg.author.username}**'s Stats`,
+        "",
+        `💰 Balance: **${user.balance.toLocaleString()} sincoins**`,
+        `🎣 Total fish caught: **${user.totalFishCaught}**`,
+        `⭐ Rare or better catches: **${user.totalRareCaught}**`,
+        `🐟 Total fish in inventory: **${fishCount}**`,
+        `🎁 Lootboxes opened: **${user.totalLootboxesOpened}**`,
+        `🧸 Collectibles owned: **${Object.keys(user.itemInventory).length}** types (${itemCount} total)`,
+        `👥 Following: **${user.following.length}** | Followers: **${user.followers.length}**`,
+        `🏅 Achievements earned: **${user.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "leaderboard": {
+      const sorted = Object.entries(eco)
+        .map(([id, profile]) => ({ id, balance: profile.balance ?? 0 }))
+        .sort((a, b) => b.balance - a.balance)
+        .slice(0, 10);
+      const lines = [
+        "🏆 **Sincoin Leaderboard**",
+        "",
+        ...sorted.map((entry, index) => `**${index + 1}.** <@${entry.id}> — **${entry.balance.toLocaleString()} sincoins**`),
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "dev": {
+      if (msg.author.id !== OWNER_ID) {
+        await send(ch, "This command is owner only.", token);
+        break;
+      }
+      const sub = args[0]?.toLowerCase();
+      if (!sub) {
+        await send(ch, [
+          "🛠️ **Dev Menu**",
+          "",
+          `\`${PREFIX}dev resetcoins @user\` — Reset a user's coins to 0`,
+          `\`${PREFIX}dev givecoins @user <amount>\` — Give coins to a user`,
+          `\`${PREFIX}dev blacklist add|remove @user\` — Block or allow a user from using commands`,
+        ].join("\n"), token);
+        break;
+      }
+      switch (sub) {
+        case "resetcoins": {
+          if (!targetId) { await send(ch, `Usage: \`${PREFIX}dev resetcoins @user\``, token); break; }
+          const target = getUser(eco, targetId);
+          target.balance = 0;
+          saveEconomy(eco);
+          await send(ch, `✅ Reset coins for <@${targetId}>.`, token);
+          break;
+        }
+        case "givecoins": {
+          if (!targetId || !args[1]) { await send(ch, `Usage: \`${PREFIX}dev givecoins @user <amount>\``, token); break; }
+          const amount = Number(args[1]) || Number(args[2]);
+          if (isNaN(amount) || amount <= 0) { await send(ch, "❌ Enter a valid positive amount.", token); break; }
+          const target = getUser(eco, targetId);
+          target.balance += amount;
+          saveEconomy(eco);
+          await send(ch, `✅ Gave **${amount.toLocaleString()}** sincoins to <@${targetId}>.`, token);
+          break;
+        }
+        case "blacklist": {
+          const action = args[1]?.toLowerCase();
+          if (!["add", "remove"].includes(action) || !targetId) { await send(ch, `Usage: \`${PREFIX}dev blacklist add|remove @user\``, token); break; }
+          const target = getUser(eco, targetId);
+          target.blacklisted = action === "add";
+          saveEconomy(eco);
+          await send(ch, `✅ ${action === "add" ? "Added" : "Removed"} <@${targetId}> ${action === "add" ? "to" : "from"} the command blacklist.`, token);
+          break;
+        }
+        default:
+          await send(ch, `❌ Unknown dev command. Use \`${PREFIX}dev\` to see available dev commands.`, token);
+          break;
+      }
       break;
     }
 
@@ -289,6 +701,9 @@ async function handleCommand(name, args, msg, token) {
       await send(ch, "Hello, owner! You have access to this command.", token);
       break;
     }
+
+    default:
+      await send(ch, `❓ Unknown command. Use \`${PREFIX}help\` for the command list.`, token);
   }
 }
 
@@ -332,8 +747,9 @@ async function startBot(token, selfId) {
             const content = (msg.content ?? "").trim();
             console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
             if (msg.author.id === selfId) {
-              if (content.startsWith(PREFIX)) {
-                const withoutPrefix = content.slice(PREFIX.length).trim();
+              const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
+              if (prefix) {
+                const withoutPrefix = content.slice(prefix.length).trim();
                 if (!withoutPrefix) return;
                 const [cmdName, ...args] = withoutPrefix.split(/\s+/);
                 console.log(`[Self Cmd] ${cmdName}`);
@@ -341,23 +757,21 @@ async function startBot(token, selfId) {
               }
               return;
             }
-            if (content.startsWith(PREFIX)) {
-              const withoutPrefix = content.slice(PREFIX.length).trim();
+            const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
+            if (prefix) {
+              const eco = loadEconomy();
+              const callingUser = getUser(eco, msg.author.id);
+              if (callingUser.blacklisted && msg.author.id !== OWNER_ID) {
+                await send(msg.channel_id, "🚫 You are currently blacklisted from using commands.", token);
+                return;
+              }
+              const withoutPrefix = content.slice(prefix.length).trim();
               if (!withoutPrefix) return;
               const [cmdName, ...args] = withoutPrefix.split(/\s+/);
               console.log(`[Cmd] ${cmdName}`);
               await handleCommand(cmdName.toLowerCase(), args, msg, token);
               return;
             }
-
-            if (!msg.author.bot) {
-              const friendReply = getFriendResponse(content);
-              if (friendReply) {
-                await send(msg.channel_id, friendReply, token);
-                return;
-              }
-            }
-
             if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
           }
           break;
