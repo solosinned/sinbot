@@ -17,6 +17,7 @@ const PASSWORD = process.env.BOT_PASSWORD ?? "";
 const PREFIX = process.env.BOT_PREFIX ?? "s!";
 const AUTO_REPLY = process.env.BOT_AUTO_REPLY === "true";
 const AUTO_REPLY_MESSAGE = process.env.BOT_AUTO_REPLY_MESSAGE ?? "Hello! I'm a bot.";
+const OWNER_ID = process.env.OWNER_ID ?? "";
 
 // ─── OpenAI (set OPENAI_API_KEY on Railway) ───────────────────────────────────
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -140,6 +141,9 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}balance\` — Check your sincoins`,
         `\`${PREFIX}shop\` — Browse the shop`,
         `\`${PREFIX}buy <item>\` — Buy an item (e.g. \`${PREFIX}buy 2x\`)`,
+        "",
+        "**Owner**",
+        `\`${PREFIX}owner\` — Owner only command`,
       ].join("\n"), token);
       break;
 
@@ -256,6 +260,15 @@ async function handleCommand(name, args, msg, token) {
       user.multiplier = item.multiplier;
       saveEconomy(eco);
       await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 Your daily earnings are now **${item.multiplier}x**!`].join("\n"), token);
+      break;
+    }
+
+    case "owner": {
+      if (msg.author.id !== OWNER_ID) {
+        await send(ch, "This command is owner only.", token);
+        break;
+      }
+      await send(ch, "Hello, owner! You have access to this command.", token);
       break;
     }
   }
