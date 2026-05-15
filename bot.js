@@ -311,16 +311,25 @@ async function startBot(token, selfId) {
           if (t === "GUILD_CREATE") for (const p of d.presences ?? []) { if (p.user?.id && p.status) presenceMap.set(p.user.id, p.status); }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
-            if (msg.author.id === selfId) break;
             const content = (msg.content ?? "").trim();
             console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
+            if (msg.author.id === selfId) {
+              if (content.startsWith(PREFIX)) {
+                const withoutPrefix = content.slice(PREFIX.length).trim();
+                if (!withoutPrefix) return;
+                const [cmdName, ...args] = withoutPrefix.split(/\s+/);
+                console.log(`[Self Cmd] ${cmdName}`);
+                await handleCommand(cmdName.toLowerCase(), args, msg, token);
+              }
+              return;
+            }
             if (content.startsWith(PREFIX)) {
               const withoutPrefix = content.slice(PREFIX.length).trim();
-              if (!withoutPrefix) break;
+              if (!withoutPrefix) return;
               const [cmdName, ...args] = withoutPrefix.split(/\s+/);
               console.log(`[Cmd] ${cmdName}`);
               await handleCommand(cmdName.toLowerCase(), args, msg, token);
-              break;
+              return;
             }
             if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
           }
