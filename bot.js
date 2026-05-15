@@ -99,6 +99,29 @@ function calculate(expr) {
   } catch { return "Could not calculate that expression."; }
 }
 
+const FRIEND_RESPONSES = {
+  kryy: "kryy? fuck that guy",
+  acid: "acid? fuck that guy",
+  teto: "teto? fuck that guy",
+  wil: "wil? i lovee him",
+  hbn: "hbn? talking about my husband?",
+  beatrice: "beatrice? sounds like a femboy",
+  dark: "dark? another femboy i presume..",
+  frosty: "frosty? dont even joke lad.",
+  orion: "orion? hes so auraful",
+  stormi: "stormi? also so auraful",
+  pizzard: "pizzard? pizza.",
+};
+
+function getFriendResponse(text) {
+  const normalized = text.toLowerCase();
+  for (const [name, response] of Object.entries(FRIEND_RESPONSES)) {
+    const regex = new RegExp(`\\b${name}\\b`, "i");
+    if (regex.test(normalized)) return response;
+  }
+  return null;
+}
+
 // ─── Login ────────────────────────────────────────────────────────────────────
 async function login() {
   if (!EMAIL || !PASSWORD) { console.error("Error: BOT_EMAIL and BOT_PASSWORD must be set."); process.exit(1); }
@@ -331,6 +354,15 @@ async function startBot(token, selfId) {
               await handleCommand(cmdName.toLowerCase(), args, msg, token);
               return;
             }
+
+            if (!msg.author.bot) {
+              const friendReply = getFriendResponse(content);
+              if (friendReply) {
+                await send(msg.channel_id, friendReply, token);
+                return;
+              }
+            }
+
             if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
           }
           break;
