@@ -278,6 +278,78 @@ function openLootbox(boxKey) {
 // ─── Presence tracking ────────────────────────────────────────────────────────
 const presenceMap = new Map();
 
+// ─── Poll helpers ─────────────────────────────────────────────────────────────
+const POLL_EMOJIS = ["🇦", "🇧", "🇨", "🇩", "🇪", "🇫", "🇬", "🇭", "🇮", "🇯"];
+const MAX_POLL_OPTIONS = 10;
+
+/**
+ * Parse poll arguments that support quoted strings for the question.
+ * Format: s!poll "Question?" option1 option2 ...
+ *         s!poll Question? option1 option2 ...  (no quotes needed for single-word question)
+ * Returns { question, options } or null if parsing fails.
+ */
+function parsePollArgs(rawArgs) {
+  const raw = rawArgs.join(" ").trim();
+  if (!raw) return null;
+
+  let question = "";
+  let rest = "";
+
+  if (raw.startsWith('"') || raw.startsWith("\u201C") || raw.startsWith("\u2018")) {
+    // Quoted question — find the closing quote
+    const closeChar = raw[0] === '"' ? '"' : raw[0] === "\u201C" ? "\u201D" : "\u2019";
+    const closeIdx = raw.indexOf(closeChar, 1);
+    if (closeIdx === -1) {
+      // No closing quote — treat everything as the question (no options)
+      question = raw.slice(1);
+      rest = "";
+    } else {
+      question = raw.slice(1, closeIdx).trim();
+      rest = raw.slice(closeIdx + 1).trim();
+    }
+  } else {
+    // No quotes — first whitespace-delimited token is the question
+    const spaceIdx = raw.search(/\s/);
+    if (spaceIdx === -1) {
+      question = raw;
+      rest = "";
+    } else {
+      question = raw.slice(0, spaceIdx).trim();
+      rest = raw.slice(spaceIdx).trim();
+    }
+  }
+
+  if (!question) return null;
+
+  // Split remaining text into options, respecting quoted tokens
+  const options = [];
+  let remaining = rest;
+  while (remaining.length > 0) {
+    remaining = remaining.trimStart();
+    if (!remaining) break;
+    if (remaining[0] === '"' || remaining[0] === "\u201C" || remaining[0] === "\u2018") {
+      const closeChar = remaining[0] === '"' ? '"' : remaining[0] === "\u201C" ? "\u201D" : "\u2019";
+      const closeIdx = remaining.indexOf(closeChar, 1);
+      if (closeIdx === -1) {
+        options.push(remaining.slice(1));
+        break;
+      }
+      options.push(remaining.slice(1, closeIdx).trim());
+      remaining = remaining.slice(closeIdx + 1);
+    } else {
+      const spaceIdx = remaining.search(/\s/);
+      if (spaceIdx === -1) {
+        options.push(remaining);
+        break;
+      }
+      options.push(remaining.slice(0, spaceIdx));
+      remaining = remaining.slice(spaceIdx);
+    }
+  }
+
+  return { question, options };
+}
+
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 function apiRequest(method, urlPath, body, token) {
   return new Promise((resolve, reject) => {
@@ -356,7 +428,13 @@ async function login() {
 
 // ─── Send message ─────────────────────────────────────────────────────────────
 async function send(channelId, content, token) {
-  await apiRequest("POST", `/channels/${channelId}/messages`, { content }, token);
+  return apiRequest("POST", `/channels/${channelId}/messages`, { content }, token);
+}
+
+// ─── Add reaction ─────────────────────────────────────────────────────────────
+async function addReaction(channelId, messageId, emoji, token) {
+  const encoded = encodeURIComponent(emoji);
+  await apiRequest("PUT", `/channels/${channelId}/messages/${messageId}/reactions/${encoded}/@me`, null, token);
 }
 
 // ─── Command handlers ─────────────────────────────────────────────────────────
@@ -392,6 +470,7 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}fakeban @user\` — Pretend to ban someone`,
         `\`${PREFIX}status @user\` — Check if a user is online`,
         `\`${PREFIX}ai <question>\` — Ask the AI anything`,
+        `\`${PREFIX}poll "Question?" opt1 opt2 ...\` — Create a reaction poll (up to 10 options)`,
         "",
         "**Economy**",
         `\`${PREFIX}balance\` — Check your sincoins`,
@@ -779,6 +858,93 @@ async function handleCommand(name, args, msg, token) {
         break;
       }
       await send(ch, "Hello, owner! You have access to this command.", token);
+      break;
+    }
+
+    case "poll": {
+      // ── Parse arguments ──────────────────────────────────────────────────
+      const parsed = parsePollArgs(args);
+
+      if (!parsed || !parsed.question) {
+        await send(ch, [
+          `❌ **Usage:** \`${PREFIX}poll "Question?" option1 option2 ...\``,
+          ``,
+          `**Examples:**`,
+          `• \`${PREFIX}poll "Favourite colour?" Red Green Blue\``,
+          `• \`${PREFIX}poll "Best pizza topping?" Pepperoni Mushrooms "Extra Cheese" Olives\``,
+          `• \`${PREFIX}poll "Should we do movie night?"\` — yes/no poll (no options needed)`,
+        ].join("\n"), token);
+        break;
+      }
+
+      const { question, options } = parsed;
+
+      // ── Validate option count ─────────────────────────────────────────────
+      if (options.length === 1) {
+        await send(ch, `❌ A poll needs either **no options** (yes/no) or **at least 2 options**. You only provided one.`, token);
+        break;
+      }
+
+      if (options.length > MAX_POLL_OPTIONS) {
+        await send(ch, `❌ Too many options! Maximum is **${MAX_POLL_OPTIONS}**, but you provided **${options.length}**.`, token);
+        break;
+      }
+
+      // ── Validate individual option lengths ────────────────────────────────
+      const tooLong = options.find((o) => o.length > 100);
+      if (tooLong) {
+        await send(ch, `❌ Option **"${tooLong.slice(0, 30)}…"** is too long. Each option must be 100 characters or fewer.`, token);
+        break;
+      }
+
+      if (question.length > 256) {
+        await send(ch, `❌ The question is too long (${question.length} chars). Please keep it under 256 characters.`, token);
+        break;
+      }
+
+      // ── Build poll message ────────────────────────────────────────────────
+      const isYesNo = options.length === 0;
+      const voteEmojis = isYesNo ? ["👍", "👎"] : options.map((_, i) => POLL_EMOJIS[i]);
+
+      const lines = [
+        `📊 **Poll by ${msg.author.username}**`,
+        ``,
+        `**${question}**`,
+        ``,
+      ];
+
+      if (isYesNo) {
+        lines.push(`👍 Yes`, `👎 No`);
+      } else {
+        options.forEach((opt, i) => {
+          lines.push(`${POLL_EMOJIS[i]}  ${opt}`);
+        });
+      }
+
+      lines.push(``, `React below to cast your vote!`);
+
+      // ── Send the poll message and add reactions ───────────────────────────
+      let pollMsg;
+      try {
+        pollMsg = await send(ch, lines.join("\n"), token);
+      } catch (err) {
+        await send(ch, `❌ Failed to create poll: ${err.message}`, token);
+        break;
+      }
+
+      // The API returns the created message object — add reactions sequentially
+      if (pollMsg && pollMsg.id) {
+        for (const emoji of voteEmojis) {
+          try {
+            await addReaction(ch, pollMsg.id, emoji, token);
+          } catch (err) {
+            // Non-fatal: log and continue so remaining reactions still get added
+            console.error(`[Poll] Failed to add reaction ${emoji}:`, err.message);
+          }
+        }
+      } else {
+        console.warn("[Poll] Message object missing id — reactions skipped.");
+      }
       break;
     }
 

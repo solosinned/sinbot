@@ -46,3 +46,19 @@ Use `s!help` or `!help` to see all commands in-game.
 - `s!stats @user` - View a user's stats
 - `s!joke` - Get a random joke
 - `s!dev` - Owner dev menu
+- `s!poll "Question?" option1 option2` - Create a reaction poll
+
+## Poll Command
+
+Create interactive polls with reaction voting:
+
+```
+s!poll "Favourite colour?" Red Green Blue
+s!poll "Best pizza topping?" Pepperoni Mushrooms "Extra Cheese" Olives
+s!poll "Should we do movie night?"   ← yes/no poll (no options = 👍/👎)
+```
+
+- Supports up to **10 options** (🇦–🇯)
+- Quote multi-word options: `"Extra Cheese"`
+- Omit options entirely for a simple yes/no poll
+- The bot automatically adds the reaction emojis so users can vote
