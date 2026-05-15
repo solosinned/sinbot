@@ -36,8 +36,100 @@ function saveEconomy(data) {
   fs.writeFileSync(ECONOMY_FILE, JSON.stringify(data, null, 2));
 }
 
+// ─── Fishing System ───────────────────────────────────────────────────────────
+const FISH_DATABASE = [
+  // Common Fish (50% catch rate)
+  { id: 1, name: "Goldfish", rarity: "Common", color: "🟡", price: 10, chance: 0.15 },
+  { id: 2, name: "Herring", rarity: "Common", color: "⚪", price: 12, chance: 0.12 },
+  { id: 3, name: "Mackerel", rarity: "Common", color: "🔵", price: 15, chance: 0.10 },
+  { id: 4, name: "Sardine", rarity: "Common", color: "⚪", price: 8, chance: 0.15 },
+  { id: 5, name: "Anchovy", rarity: "Common", color: "⚪", price: 7, chance: 0.12 },
+  { id: 6, name: "Minnow", rarity: "Common", color: "⚪", price: 5, chance: 0.18 },
+  { id: 7, name: "Bass", rarity: "Common", color: "🟩", price: 20, chance: 0.08 },
+  
+  // Uncommon Fish (30% catch rate)
+  { id: 8, name: "Salmon", rarity: "Uncommon", color: "🟧", price: 35, chance: 0.08 },
+  { id: 9, name: "Trout", rarity: "Uncommon", color: "🟨", price: 40, chance: 0.07 },
+  { id: 10, name: "Perch", rarity: "Uncommon", color: "🟧", price: 30, chance: 0.06 },
+  { id: 11, name: "Pike", rarity: "Uncommon", color: "🟩", price: 45, chance: 0.05 },
+  { id: 12, name: "Catfish", rarity: "Uncommon", color: "🟫", price: 35, chance: 0.06 },
+  { id: 13, name: "Carp", rarity: "Uncommon", color: "🟨", price: 38, chance: 0.06 },
+  { id: 14, name: "Flounder", rarity: "Uncommon", color: "🟦", price: 42, chance: 0.05 },
+  
+  // Rare Fish (12% catch rate)
+  { id: 15, name: "Tuna", rarity: "Rare", color: "🔵", price: 75, chance: 0.04 },
+  { id: 16, name: "Swordfish", rarity: "Rare", color: "🔷", price: 100, chance: 0.03 },
+  { id: 17, name: "Marlin", rarity: "Rare", color: "🔷", price: 110, chance: 0.025 },
+  { id: 18, name: "Snapper", rarity: "Rare", color: "🔴", price: 65, chance: 0.035 },
+  { id: 19, name: "Grouper", rarity: "Rare", color: "🟫", price: 70, chance: 0.03 },
+  { id: 20, name: "Halibut", rarity: "Rare", color: "⚪", price: 80, chance: 0.025 },
+  { id: 21, name: "Monkfish", rarity: "Rare", color: "🟦", price: 90, chance: 0.02 },
+  
+  // Epic Fish (6% catch rate)
+  { id: 22, name: "Dolphin Fish", rarity: "Epic", color: "🌊", price: 150, chance: 0.015 },
+  { id: 23, name: "Kingfish", rarity: "Epic", color: "🟡", price: 160, chance: 0.015 },
+  { id: 24, name: "Wahoo", rarity: "Epic", color: "🔵", price: 145, chance: 0.012 },
+  { id: 25, name: "Lionfish", rarity: "Epic", color: "🔴", price: 155, chance: 0.010 },
+  { id: 26, name: "Angelfish", rarity: "Epic", color: "🟨", price: 140, chance: 0.012 },
+  { id: 27, name: "Pufferfish", rarity: "Epic", color: "🟡", price: 170, chance: 0.008 },
+  { id: 28, name: "Moorish Idol", rarity: "Epic", color: "🟨", price: 165, chance: 0.010 },
+  
+  // Legendary Fish (2% catch rate)
+  { id: 29, name: "Golden Koi", rarity: "Legendary", color: "🟧", price: 300, chance: 0.006 },
+  { id: 30, name: "Dragon Fish", rarity: "Legendary", color: "🔴", price: 350, chance: 0.005 },
+  { id: 31, name: "Phoenix Fish", rarity: "Legendary", color: "🧡", price: 320, chance: 0.005 },
+  { id: 32, name: "Crystal Trout", rarity: "Legendary", color: "💎", price: 400, chance: 0.004 },
+  { id: 33, name: "Shadow Bass", rarity: "Legendary", color: "🟪", price: 310, chance: 0.006 },
+  { id: 34, name: "Silver Sturgeon", rarity: "Legendary", color: "⚪", price: 330, chance: 0.005 },
+  { id: 35, name: "Electric Eel", rarity: "Legendary", color: "🟨", price: 280, chance: 0.006 },
+  
+  // Mythical Fish (0.5% catch rate)
+  { id: 36, name: "Void Leviathan", rarity: "Mythical", color: "🟪", price: 1000, chance: 0.002 },
+  { id: 37, name: "Celestial Whale", rarity: "Mythical", color: "💫", price: 950, chance: 0.002 },
+  { id: 38, name: "Obsidian Serpent", rarity: "Mythical", color: "⬛", price: 900, chance: 0.0015 },
+  { id: 39, name: "Radiant Sunfish", rarity: "Mythical", color: "☀️", price: 850, chance: 0.002 },
+  { id: 40, name: "Twilight Manta", rarity: "Mythical", color: "🌙", price: 920, chance: 0.0015 },
+  { id: 41, name: "Prismatic Seahorse", rarity: "Mythical", color: "🌈", price: 1100, chance: 0.001 },
+  { id: 42, name: "Emerald Drake", rarity: "Mythical", color: "💚", price: 880, chance: 0.0015 },
+  
+  // Ultra Rare Variants (0.1% catch rate)
+  { id: 43, name: "Quantum Goldfish", rarity: "Ultra Rare", color: "⚛️", price: 2000, chance: 0.0005 },
+  { id: 44, name: "Cosmetic Carp", rarity: "Ultra Rare", color: "🌌", price: 1850, chance: 0.0005 },
+  { id: 45, name: "Interdimensional Pike", rarity: "Ultra Rare", color: "🌀", price: 1950, chance: 0.0005 },
+  { id: 46, name: "Temporal Trout", rarity: "Ultra Rare", color: "⏱️", price: 1800, chance: 0.0005 },
+  { id: 47, name: "Astral Angelfish", rarity: "Ultra Rare", color: "✨", price: 2100, chance: 0.0003 },
+  { id: 48, name: "Nebula Narwhal", rarity: "Ultra Rare", color: "🌠", price: 2200, chance: 0.0003 },
+  { id: 49, name: "Infinity Flounder", rarity: "Ultra Rare", color: "♾️", price: 2500, chance: 0.0002 },
+  { id: 50, name: "The Mythical One", rarity: "Ultra Rare", color: "👑", price: 5000, chance: 0.0001 },
+];
+
+const RARITY_COLORS = {
+  "Common": "⚪",
+  "Uncommon": "🟩",
+  "Rare": "🔵",
+  "Epic": "🟣",
+  "Legendary": "🟡",
+  "Mythical": "✨",
+  "Ultra Rare": "💎",
+};
+
+function catchFish() {
+  const random = Math.random();
+  let accumulated = 0;
+  
+  for (const fish of FISH_DATABASE) {
+    accumulated += fish.chance;
+    if (random < accumulated) {
+      return fish;
+    }
+  }
+  
+  // Fallback to a common fish
+  return FISH_DATABASE[0];
+}
+
 function getUser(data, userId) {
-  if (!data[userId]) data[userId] = { balance: 0, lastDaily: 0, streak: 0, multiplier: 1 };
+  if (!data[userId]) data[userId] = { balance: 0, lastDaily: 0, streak: 0, multiplier: 1, inventory: {}, lastFish: 0 };
   return data[userId];
 }
 
@@ -165,6 +257,11 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}shop\` — Browse the shop`,
         `\`${PREFIX}buy <item>\` — Buy an item (e.g. \`${PREFIX}buy 2x\`)`,
         "",
+        "**Fishing**",
+        `\`${PREFIX}fish\` — Catch a random fish (20s cooldown)`,
+        `\`${PREFIX}inventory\` — View your caught fish`,
+        `\`${PREFIX}sell <fish_id>\` — Sell a fish (e.g. \`${PREFIX}sell 1\`)`,
+        "",
         "**Owner**",
         `\`${PREFIX}owner\` — Owner only command`,
       ].join("\n"), token);
@@ -283,6 +380,111 @@ async function handleCommand(name, args, msg, token) {
       user.multiplier = item.multiplier;
       saveEconomy(eco);
       await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 Your daily earnings are now **${item.multiplier}x**!`].join("\n"), token);
+      break;
+    }
+
+    case "owner": {
+      if (msg.author.id !== OWNER_ID) {
+        await send(ch, "This command is owner only.", token);
+        break;
+      }
+      await send(ch, "Hello, owner! You have access to this command.", token);
+      break;
+    }
+
+    case "fish": {
+      const eco = loadEconomy();
+      const user = getUser(eco, msg.author.id);
+      const now = Date.now();
+      const cooldown = 20 * 1000;
+      const timeSinceLastFish = now - user.lastFish;
+      
+      if (timeSinceLastFish < cooldown) {
+        const secondsLeft = Math.ceil((cooldown - timeSinceLastFish) / 1000);
+        await send(ch, `⏳ You need to wait **${secondsLeft}** more seconds before fishing again!`, token);
+        break;
+      }
+      
+      const caughtFish = catchFish();
+      if (!user.inventory) user.inventory = {};
+      if (!user.inventory[caughtFish.id]) user.inventory[caughtFish.id] = 0;
+      user.inventory[caughtFish.id] += 1;
+      user.lastFish = now;
+      saveEconomy(eco);
+      
+      const fishEmoji = caughtFish.color;
+      const rarityEmoji = RARITY_COLORS[caughtFish.rarity] || "❓";
+      
+      await send(ch, `${fishEmoji} **You caught a ${caughtFish.rarity} ${caughtFish.name}!** ${rarityEmoji}\n💰 Worth **${caughtFish.price.toLocaleString()} sincoins**\n📊 You now have **${user.inventory[caughtFish.id]}** ${caughtFish.name}(s)`, token);
+      break;
+    }
+
+    case "inventory":
+    case "inv": {
+      const eco = loadEconomy();
+      const user = getUser(eco, msg.author.id);
+      
+      if (!user.inventory || Object.keys(user.inventory).length === 0) {
+        await send(ch, `🎣 **${msg.author.username}'s Fishing Inventory** is empty! Go catch some fish with \`${PREFIX}fish\`!`, token);
+        break;
+      }
+      
+      const lines = [`🎣 **${msg.author.username}'s Fishing Inventory**`, ""];
+      let totalValue = 0;
+      
+      for (const [fishId, count] of Object.entries(user.inventory)) {
+        const fish = FISH_DATABASE.find(f => f.id === parseInt(fishId));
+        if (fish && count > 0) {
+          const value = fish.price * count;
+          totalValue += value;
+          const rarityEmoji = RARITY_COLORS[fish.rarity] || "❓";
+          lines.push(`${fish.color} **${fish.name}** (ID: ${fishId}) ${rarityEmoji}\n   └ Qty: ${count} × ${fish.price.toLocaleString()} = **${value.toLocaleString()}** sincoins`);
+        }
+      }
+      
+      lines.push("");
+      lines.push(`💰 **Total Inventory Value:** ${totalValue.toLocaleString()} sincoins`);
+      lines.push(`💡 Use \`${PREFIX}sell <fish_id>\` to sell a fish!`);
+      
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "sell": {
+      const fishId = parseInt(args[0]);
+      if (!fishId || isNaN(fishId)) {
+        await send(ch, `Usage: \`${PREFIX}sell <fish_id>\` (e.g. \`${PREFIX}sell 1\`)\nUse \`${PREFIX}inventory\` to see your fish IDs.`, token);
+        break;
+      }
+      
+      const fish = FISH_DATABASE.find(f => f.id === fishId);
+      if (!fish) {
+        await send(ch, `❌ Fish ID **${fishId}** doesn't exist!`, token);
+        break;
+      }
+      
+      const eco = loadEconomy();
+      const user = getUser(eco, msg.author.id);
+      
+      if (!user.inventory || !user.inventory[fishId] || user.inventory[fishId] <= 0) {
+        await send(ch, `❌ You don't have any **${fish.name}**!`, token);
+        break;
+      }
+      
+      const quantity = parseInt(args[1]) || 1;
+      if (quantity > user.inventory[fishId]) {
+        await send(ch, `❌ You only have **${user.inventory[fishId]}** ${fish.name}(s)!`, token);
+        break;
+      }
+      
+      const totalValue = fish.price * quantity;
+      user.inventory[fishId] -= quantity;
+      if (user.inventory[fishId] <= 0) delete user.inventory[fishId];
+      user.balance += totalValue;
+      saveEconomy(eco);
+      
+      const pluralS = quantity > 1 ? "s" : "";
+      await send(ch, `${fish.color} **Sold ${quantity}x ${fish.name}${pluralS}** for **${totalValue.toLocaleString()} sincoins**!\n💰 New balance: **${user.balance.toLocaleString()} sincoins**`, token);
       break;
     }
 
