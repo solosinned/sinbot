@@ -18,6 +18,11 @@ const PREFIX = process.env.BOT_PREFIX ?? "s!";
 const AUTO_REPLY = process.env.BOT_AUTO_REPLY === "true";
 const AUTO_REPLY_MESSAGE = process.env.BOT_AUTO_REPLY_MESSAGE ?? "Hello! I'm a bot.";
 const OWNER_ID = process.env.OWNER_ID ?? "";
+let BOT_USER_ID = "";
+
+function isOwner(userId) {
+  return Boolean(userId) && (userId === OWNER_ID || userId === BOT_USER_ID);
+}
 
 // ─── OpenAI (set OPENAI_API_KEY on Railway) ───────────────────────────────────
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -144,10 +149,6 @@ const LOOTBOXES = {
 };
 
 const SHOP_ITEMS = {
-  "2x":  { name: "2x Multiplier",  cost: 500,  type: "multiplier",  multiplier: 2,  description: "Doubles your daily sincoins." },
-  "3x":  { name: "3x Multiplier",  cost: 1500, type: "multiplier",  multiplier: 3,  description: "Triples your daily sincoins." },
-  "5x":  { name: "5x Multiplier",  cost: 3000, type: "multiplier",  multiplier: 5,  description: "5x your daily sincoins." },
-  "10x": { name: "10x Multiplier", cost: 8000, type: "multiplier",  multiplier: 10, description: "10x your daily sincoins." },
   "betterbait": { name: "Better Bait", cost: 2000, type: "upgrade", upgrade: { fishLuck: 0.5 }, description: "Improve fishing odds for rarer fish." },
   "anglerrod": { name: "Angler Rod", cost: 5000, type: "upgrade", upgrade: { fishLuck: 1 }, description: "Greatly increase your chance at rarer fish." },
   "lureking": { name: "Lure King", cost: 12000, type: "upgrade", upgrade: { fishLuck: 2 }, description: "Massively boost rare fish odds." },
@@ -340,10 +341,9 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}ai <question>\` — Ask the AI anything`,
         "",
         "**Economy**",
-        `\`${PREFIX}daily\` — Claim your daily sincoins`,
         `\`${PREFIX}balance\` — Check your sincoins`,
         `\`${PREFIX}shop\` — Browse the shop`,
-        `\`${PREFIX}buy <item>\` — Buy multipliers, upgrades, or lootboxes`,
+        `\`${PREFIX}buy <item>\` — Buy upgrades or lootboxes`,
         "",
         "**Fishing & Inventory**",
         `\`${PREFIX}fish\` — Try to catch a fish (20s cooldown)`,
@@ -418,36 +418,11 @@ async function handleCommand(name, args, msg, token) {
     case "balance":
     case "bal":
     case "coins": {
-      const mult = user.multiplier > 1 ? ` (${user.multiplier}x multiplier active)` : "";
       const fishLuckDesc = user.upgrades?.fishLuck ? ` | Fishing bonus: +${user.upgrades.fishLuck} rare odds` : "";
-      await send(ch, `💰 **${msg.author.username}** has **${user.balance.toLocaleString()} sincoins**${mult}${fishLuckDesc}`, token);
+      await send(ch, `💰 **${msg.author.username}** has **${user.balance.toLocaleString()} sincoins**${fishLuckDesc}`, token);
       break;
     }
 
-    case "daily": {
-      const now = Date.now();
-      const fifteenHours = 15 * 60 * 60 * 1000;
-      const timeSinceLast = now - user.lastDaily;
-      if (timeSinceLast < fifteenHours) {
-        user.streak += 1;
-        const bonus = user.streak * 50;
-        const earned = Math.round((100 + bonus) * user.multiplier);
-        user.balance += earned;
-        user.lastDaily = now;
-        saveUser();
-        const hoursLeft = Math.floor((fifteenHours - timeSinceLast) / 3600000);
-        const minsLeft = Math.floor(((fifteenHours - timeSinceLast) % 3600000) / 60000);
-        await send(ch, [`🔥 **Streak x${user.streak + 1}!** +${earned} sincoins (100 base + ${bonus} streak bonus${user.multiplier > 1 ? ` × ${user.multiplier}x multi` : ""})`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`, `⏰ Next bonus in **${hoursLeft}h ${minsLeft}m**`].join("\n"), token);
-      } else {
-        if (user.lastDaily !== 0) user.streak = 0;
-        const earned = Math.round(100 * user.multiplier);
-        user.balance += earned;
-        user.lastDaily = now;
-        saveUser();
-        await send(ch, [`✅ **Daily claimed!** +${earned} sincoins${user.multiplier > 1 ? ` (${user.multiplier}x multiplier!)` : ""}`, `💰 Balance: **${user.balance.toLocaleString()} sincoins**`, `💡 Use \`${PREFIX}daily\` again within 15 hours for a streak bonus!`].join("\n"), token);
-      }
-      break;
-    }
 
     case "shop": {
       const lines = [`🛒 **Sincoin Shop** | Balance: **${user.balance.toLocaleString()} sincoins**`, "", ...Object.entries(SHOP_ITEMS).map(([key, item]) => {
@@ -455,7 +430,7 @@ async function handleCommand(name, args, msg, token) {
         const label = item.type === "lootbox" ? "Lootbox" : item.type === "upgrade" ? "Upgrade" : item.type === "multiplier" ? "Multiplier" : "Item";
         return `\`${PREFIX}buy ${key}\` — **${item.name}** — ${price} sincoins (${label})\n  › ${item.description}`;
       })];
-      lines.push("", `*Multipliers affect \`${PREFIX}daily\` earnings.*`, `*Lootboxes open items instantly when purchased.*`);
+      lines.push("", `*Lootboxes open items instantly when purchased.*`);
       await send(ch, lines.join("\n"), token);
       break;
     }
@@ -469,7 +444,7 @@ async function handleCommand(name, args, msg, token) {
       if (item.type === "multiplier") {
         user.multiplier = item.multiplier;
         saveUser();
-        await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 Your daily earnings are now **${user.multiplier}x**!`].join("\n"), token);
+        await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 You now have a **${user.multiplier}x multiplier**.`, `⚠️ Note: multiplier items are currently not linked to a daily reward.`].join("\n"), token);
       } else if (item.type === "upgrade") {
         Object.entries(item.upgrade).forEach(([key, value]) => { user.upgrades[key] = (user.upgrades[key] || 0) + value; });
         saveUser();
@@ -643,7 +618,7 @@ async function handleCommand(name, args, msg, token) {
     }
 
     case "dev": {
-      if (msg.author.id !== OWNER_ID) {
+      if (!isOwner(msg.author.id)) {
         await send(ch, "This command is owner only.", token);
         break;
       }
@@ -694,7 +669,7 @@ async function handleCommand(name, args, msg, token) {
     }
 
     case "owner": {
-      if (msg.author.id !== OWNER_ID) {
+      if (!isOwner(msg.author.id)) {
         await send(ch, "This command is owner only.", token);
         break;
       }
@@ -761,7 +736,7 @@ async function startBot(token, selfId) {
             if (prefix) {
               const eco = loadEconomy();
               const callingUser = getUser(eco, msg.author.id);
-              if (callingUser.blacklisted && msg.author.id !== OWNER_ID) {
+              if (callingUser.blacklisted && !isOwner(msg.author.id)) {
                 await send(msg.channel_id, "🚫 You are currently blacklisted from using commands.", token);
                 return;
               }
@@ -799,6 +774,7 @@ async function main() {
   console.log("=== Sinbot ===");
   const token = await login();
   const me = await apiRequest("GET", "/users/@me", undefined, token);
+  BOT_USER_ID = me.id;
   console.log(`Authenticated as: ${me.username} (${me.id})`);
   await startBot(token, me.id);
 }
