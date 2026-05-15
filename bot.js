@@ -488,6 +488,43 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
+    case "nsfw": {
+      const tag = args[0]?.toLowerCase();
+      if (!tag) {
+        await send(ch, `Usage: \`${PREFIX}nsfw <tag>\`\nAllowed tags: ${[...HIDDEN_NSFW_TAGS].join(", ")}`, token);
+        break;
+      }
+
+      if (!HIDDEN_NSFW_TAGS.has(tag)) {
+        await send(ch, `❌ Unknown or unsupported tag. Allowed tags: ${[...HIDDEN_NSFW_TAGS].join(", ")}`, token);
+        break;
+      }
+
+      const apiUrl = `https://rule34.xxx/index.php?page=dapi&s=post&q=index&json=1&tags=${encodeURIComponent(tag)}`;
+      let posts;
+
+      try {
+        posts = await fetchJson(apiUrl);
+      } catch (err) {
+        await send(ch, `❌ Failed to fetch NSFW content. Try again later.`, token);
+        break;
+      }
+
+      if (!Array.isArray(posts) || posts.length === 0) {
+        await send(ch, `❌ No images found for tag **${tag}**.`, token);
+        break;
+      }
+
+      const post = posts[Math.floor(Math.random() * posts.length)];
+      if (!post?.file_url) {
+        await send(ch, `❌ Unexpected API response while fetching the image.`, token);
+        break;
+      }
+
+      await send(ch, `🔞 **Random ${tag} image**: ${post.file_url}`, token);
+      break;
+    }
+
     case "owner": {
       if (msg.author.id !== OWNER_ID) {
         await send(ch, "This command is owner only.", token);
@@ -583,7 +620,7 @@ async function startBot(token, selfId) {
 
     ws.on("error", (err) => console.error("[Gateway] Error:", err.message));
   }
-
+                                                                                                                                                                                                                                                                                                       
   connect();
 }
 
