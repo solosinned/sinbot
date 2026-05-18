@@ -32,8 +32,16 @@ function isDevUser(userId, eco) {
   return eco[userId].whitelisted === true;
 }
 
-// ─── OpenAI (set OPENAI_API_KEY on Railway) ───────────────────────────────────
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ─── OpenAI (set OPENAI_API_KEY on Railway, or use Replit AI integration vars) ─
+let _openai = null;
+function getOpenAI() {
+  if (_openai) return _openai;
+  const apiKey = process.env.OPENAI_API_KEY ?? process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey) return null;
+  _openai = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+  return _openai;
+}
 
 // ─── Economy storage ──────────────────────────────────────────────────────────
 const ECONOMY_FILE = path.join(__dirname, "economy.json");
@@ -311,19 +319,19 @@ function openLootbox(boxKey) {
 
 // ─── Rotating statuses ────────────────────────────────────────────────────────
 const ROTATING_STATUSES = [
-  { name: "recording Roblox", type: 0 },
-  { name: "editing a video", type: 0 },
-  { name: "overseeing servers", type: 0 },
-  { name: "streaming to no one", type: 0 },
-  { name: "reading chat logs", type: 0 },
-  { name: "moderating the server", type: 0 },
-  { name: "responding to DMs", type: 0 },
-  { name: "planning world domination", type: 0 },
-  { name: "debugging the bot", type: 0 },
-  { name: "watching your every move", type: 3 },
-  { name: "lo-fi beats to chill to", type: 2 },
-  { name: "uploading a new video", type: 0 },
-  { name: "Minecraft at 3am", type: 0 },
+  { state: "recording Roblox 🎮" },
+  { state: "editing a video 🎬" },
+  { state: "overseeing servers 🖥️" },
+  { state: "streaming to no one 📡" },
+  { state: "reading chat logs 📋" },
+  { state: "moderating the server 🔨" },
+  { state: "responding to DMs 💬" },
+  { state: "planning world domination 🌍" },
+  { state: "debugging the bot 🐛" },
+  { state: "watching your every move 👁️" },
+  { state: "listening to lo-fi 🎵" },
+  { state: "uploading a new video 📤" },
+  { state: "playing Minecraft at 3am 🪓" },
 ];
 
 // ─── Presence tracking ────────────────────────────────────────────────────────
@@ -510,6 +518,8 @@ async function handleCommand(name, args, msg, token) {
     case "ask": {
       const question = text;
       if (!question) { await send(ch, `Usage: \`${PREFIX}ai <question>\``, token); break; }
+      const openai = getOpenAI();
+      if (!openai) { await send(ch, "❌ AI is not configured. Set `OPENAI_API_KEY` to enable it.", token); break; }
       await send(ch, "🤔 Thinking...", token);
       try {
         const response = await openai.chat.completions.create({
@@ -940,7 +950,18 @@ async function startBot(token, selfId) {
   let reconnectDelay = 1000;
 
   function buildPresence(activity) {
-    return { op: 3, d: { since: null, status: "online", afk: false, activities: [{ name: activity.name, type: activity.type }] } };
+    return {
+      op: 3,
+      d: {
+        since: null,
+        status: "online",
+        afk: false,
+        activities: [
+          { name: activity.state, type: 0 },
+          { name: "Custom Status", type: 4, state: activity.state },
+        ],
+      },
+    };
   }
 
   function connect() {
@@ -959,13 +980,13 @@ async function startBot(token, selfId) {
           if (heartbeatInterval) clearInterval(heartbeatInterval);
           heartbeatInterval = setInterval(() => ws.send(JSON.stringify({ op: 1, d: sequence })), heartbeat_interval);
           const firstStatus = ROTATING_STATUSES[0];
-          ws.send(JSON.stringify({ op: 2, d: { token, properties: { $os: "linux", $browser: "sinbot", $device: "sinbot" }, presence: { status: "online", activities: [{ name: firstStatus.name, type: firstStatus.type }], afk: false } } }));
+          ws.send(JSON.stringify({ op: 2, d: { token, properties: { $os: "linux", $browser: "sinbot", $device: "sinbot" }, presence: { status: "online", activities: [{ name: firstStatus.state, type: 0 }, { name: "Custom Status", type: 4, state: firstStatus.state }], afk: false } } }));
           if (statusInterval) clearInterval(statusInterval);
           statusInterval = setInterval(() => {
             statusIndex = (statusIndex + 1) % ROTATING_STATUSES.length;
             const next = ROTATING_STATUSES[statusIndex];
             try { ws.send(JSON.stringify(buildPresence(next))); } catch {}
-            console.log(`[Status] Now: ${next.type === 2 ? "Listening to" : next.type === 3 ? "Watching" : "Playing"} ${next.name}`);
+            console.log(`[Status] Now: ${next.state}`);
           }, 3 * 60 * 1000);
           break;
         }
@@ -977,6 +998,10 @@ async function startBot(token, selfId) {
             for (const guild of d.guilds) {
               ws.send(JSON.stringify({ op: 14, d: { guild_id: guild.id, typing: true, activities: true, threads: true, members: [] } }));
             }
+            setTimeout(() => {
+              const current = ROTATING_STATUSES[statusIndex];
+              try { ws.send(JSON.stringify(buildPresence(current))); console.log(`[Status] Set: ${current.state}`); } catch {}
+            }, 2000);
           }
           if (t === "PRESENCE_UPDATE" && d.user?.id && d.status) presenceMap.set(d.user.id, d.status);
           if (t === "GUILD_CREATE") for (const p of d.presences ?? []) { if (p.user?.id && p.status) presenceMap.set(p.user.id, p.status); }
