@@ -1,3 +1,4 @@
+// @ts-nocheck
 import WebSocket from "ws";
 import https from "https";
 import http from "http";
@@ -18,10 +19,17 @@ const PREFIX = process.env.BOT_PREFIX ?? "s!";
 const AUTO_REPLY = process.env.BOT_AUTO_REPLY === "true";
 const AUTO_REPLY_MESSAGE = process.env.BOT_AUTO_REPLY_MESSAGE ?? "Hello! I'm a bot.";
 const OWNER_ID = process.env.OWNER_ID ?? "";
+const AUTO_ROLE_ID = process.env.AUTO_ROLE_ID ?? "";
 let BOT_USER_ID = "";
 
 function isOwner(userId) {
   return Boolean(userId) && (userId === OWNER_ID || userId === BOT_USER_ID);
+}
+
+function isDevUser(userId, eco) {
+  if (isOwner(userId)) return true;
+  if (!eco || !eco[userId]) return false;
+  return eco[userId].whitelisted === true;
 }
 
 // ─── OpenAI (set OPENAI_API_KEY on Railway) ───────────────────────────────────
@@ -31,6 +39,30 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const ECONOMY_FILE = path.join(__dirname, "economy.json");
 const ALT_PREFIX = "!";
 const FISH_COOLDOWN_MS = 20 * 1000;
+const WORK_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+const WORK_JOBS = [
+  { name: "Street Musician", description: "You played guitar on the corner and collected tips.", minPay: 80, maxPay: 200 },
+  { name: "Pizza Delivery Driver", description: "You delivered 12 pizzas across town, some tips were generous.", minPay: 150, maxPay: 350 },
+  { name: "Freelance Programmer", description: "You fixed a bug for a client and got paid.", minPay: 300, maxPay: 700 },
+  { name: "Dog Walker", description: "You walked 6 dogs through the park. One escaped briefly.", minPay: 60, maxPay: 180 },
+  { name: "Security Guard", description: "You stood at a door and looked intimidating all night.", minPay: 200, maxPay: 400 },
+  { name: "Twitch Streamer", description: "You streamed for 4 hours and got a few donations.", minPay: 50, maxPay: 600 },
+  { name: "Barista", description: "You made lattes and foam art all morning.", minPay: 100, maxPay: 250 },
+  { name: "Stock Trader", description: "You made a risky trade. It paid off... this time.", minPay: 100, maxPay: 900 },
+  { name: "Anime Artist", description: "You drew commissions for fans online.", minPay: 200, maxPay: 550 },
+  { name: "Sushi Chef", description: "You rolled sushi at a busy restaurant all evening.", minPay: 180, maxPay: 380 },
+  { name: "Bounty Hunter", description: "You tracked down a target and collected the reward.", minPay: 400, maxPay: 900 },
+  { name: "Treasure Hunter", description: "You dug around an old site and found something valuable.", minPay: 250, maxPay: 1100 },
+  { name: "Ninja Assassin", description: "You completed a covert mission for a mysterious client.", minPay: 600, maxPay: 1400 },
+  { name: "Mechanic", description: "You repaired someone's car and they tipped well.", minPay: 200, maxPay: 500 },
+  { name: "Librarian", description: "You sorted books and helped a few confused students.", minPay: 70, maxPay: 180 },
+  { name: "Pharmacist", description: "You filled prescriptions and gave solid advice.", minPay: 300, maxPay: 600 },
+  { name: "Dungeon Master", description: "You ran a D&D session for a full party. They tipped in gold.", minPay: 120, maxPay: 350 },
+  { name: "Crypto Degen", description: "You stared at charts all day. Green candles only today.", minPay: 0, maxPay: 1500 },
+  { name: "Mercenary", description: "You took a dangerous job and survived. Barely.", minPay: 500, maxPay: 1200 },
+  { name: "Taxi Driver", description: "You drove strangers around the city all shift.", minPay: 100, maxPay: 300 },
+];
 
 const FISH_RARITY_BOOST = {
   common: 0,
@@ -211,6 +243,8 @@ function getUser(data, userId) {
       totalItemsSold: 0,
       totalLootboxesOpened: 0,
       lootboxPurchases: [],
+      workCooldown: 0,
+      warnings: [],
       joinedAt: Date.now(),
     };
   }
@@ -319,18 +353,14 @@ function getMentionedId(args) {
 }
 
 function getMentionedUser(msg, args) {
-  // First check direct mentions in args
   const mentionId = getMentionedId(args);
   if (mentionId) {
     const mentionedUser = msg.mentions.find((m) => m.id === mentionId);
     return { id: mentionId, username: mentionedUser?.username ?? `User${mentionId}` };
   }
-  
-  // Then check msg.mentions array (should have parsed mentions from Discord)
   if (msg.mentions && msg.mentions.length > 0) {
     return { id: msg.mentions[0].id, username: msg.mentions[0].username };
   }
-  
   return null;
 }
 
@@ -393,10 +423,11 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}status @user\` — Check if a user is online`,
         `\`${PREFIX}ai <question>\` — Ask the AI anything`,
         "",
-        "**Economy**",
+        "**Economy & Jobs**",
         `\`${PREFIX}balance\` — Check your sincoins`,
         `\`${PREFIX}shop\` — Browse the shop`,
         `\`${PREFIX}buy <item>\` — Buy upgrades or lootboxes`,
+        `\`${PREFIX}work\` — Do a random job (12h cooldown)`,
         "",
         "**Fishing & Inventory**",
         `\`${PREFIX}fish\` — Try to catch a fish (20s cooldown)`,
@@ -407,8 +438,15 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}leaderboard\` — View the top sincoin holders`,
         `\`${PREFIX}follow @user\` — Follow another user`,
         "",
+        "**Moderation**",
+        `\`${PREFIX}warn @user <reason>\` — Warn a user (mod only)`,
+        `\`${PREFIX}warncheck @user\` — Check a user's warnings`,
+        `\`${PREFIX}kick @user [reason]\` — Kick a user (mod only)`,
+        `\`${PREFIX}ban @user [reason]\` — Ban a user (mod only)`,
+        `\`${PREFIX}poll <option1> | <option2>\` — Start a poll`,
+        "",
         "**Developer**",
-        `\`${PREFIX}dev\` — Owner only dev menu`,
+        `\`${PREFIX}dev\` — Owner/whitelisted dev menu`,
       ].join("\n"), token);
       break;
 
@@ -424,8 +462,7 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
-    case "fakeban":
-    case "ban": {
+    case "fakeban": {
       const targetName = targetId ? (msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`) : args.join(" ") || "that user";
       const mention = targetId ? `<@${targetId}>` : targetName;
       await send(ch, `🔨 **${mention}** has been banned from the server.\n> *Reason: violating community rules.*`, token);
@@ -482,7 +519,6 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
-
     case "shop": {
       const lines = [`🛒 **Sincoin Shop** | Balance: **${user.balance.toLocaleString()} sincoins**`, "", ...Object.entries(SHOP_ITEMS).map(([key, item]) => {
         const price = item.cost.toLocaleString();
@@ -499,8 +535,7 @@ async function handleCommand(name, args, msg, token) {
       if (!itemKey || !SHOP_ITEMS[itemKey]) { await send(ch, `❌ Unknown item. Use \`${PREFIX}shop\` to see available items.`, token); break; }
       const item = SHOP_ITEMS[itemKey];
       if (user.balance < item.cost) { await send(ch, `❌ You need **${item.cost.toLocaleString()} sincoins** but only have **${user.balance.toLocaleString()}**.`, token); break; }
-      
-      // Lootbox cooldown check (12 per 15 hours)
+
       if (item.type === "lootbox") {
         const now = Date.now();
         const fifteenHoursMs = 15 * 60 * 60 * 1000;
@@ -514,7 +549,7 @@ async function handleCommand(name, args, msg, token) {
           break;
         }
       }
-      
+
       user.balance -= item.cost;
       if (item.type === "multiplier") {
         user.multiplier = item.multiplier;
@@ -526,10 +561,7 @@ async function handleCommand(name, args, msg, token) {
         await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `✨ Your fishing odds for rarer fish have improved!`].join("\n"), token);
       } else if (item.type === "lootbox") {
         const loot = openLootbox(itemKey);
-        if (!loot) {
-          await send(ch, `❌ Something went wrong opening **${item.name}**.`, token);
-          break;
-        }
+        if (!loot) { await send(ch, `❌ Something went wrong opening **${item.name}**.`, token); break; }
         user.itemInventory[loot.name] = (user.itemInventory[loot.name] || 0) + 1;
         user.totalLootboxesOpened += 1;
         user.lootboxPurchases = (user.lootboxPurchases || []).concat(Date.now());
@@ -622,23 +654,23 @@ async function handleCommand(name, args, msg, token) {
     case "follow": {
       const mentioned = getMentionedUser(msg, args);
       if (!mentioned) { await send(ch, `Usage: \`${PREFIX}follow @user\``, token); break; }
-      const targetId = mentioned.id;
-      const targetName = mentioned.username;
-      if (targetId === msg.author.id) { await send(ch, "You cannot follow yourself.", token); break; }
-      const targetUser = getUser(eco, targetId);
-      const alreadyFollowing = user.following.includes(targetId);
+      const followTargetId = mentioned.id;
+      const followTargetName = mentioned.username;
+      if (followTargetId === msg.author.id) { await send(ch, "You cannot follow yourself.", token); break; }
+      const targetUser = getUser(eco, followTargetId);
+      const alreadyFollowing = user.following.includes(followTargetId);
       if (alreadyFollowing) {
-        user.following = user.following.filter((id) => id !== targetId);
+        user.following = user.following.filter((id) => id !== followTargetId);
         targetUser.followers = targetUser.followers.filter((id) => id !== msg.author.id);
         saveUser();
-        await send(ch, `👋 You unfollowed **${targetName}**.`, token);
+        await send(ch, `👋 You unfollowed **${followTargetName}**.`, token);
       } else {
-        user.following.push(targetId);
+        user.following.push(followTargetId);
         targetUser.followers.push(msg.author.id);
         awardAchievement(user, "follow_friend");
         saveUser();
         saveEconomy(eco);
-        await send(ch, `✅ You are now following **${targetName}**!`, token);
+        await send(ch, `✅ You are now following **${followTargetName}**!`, token);
       }
       break;
     }
@@ -664,35 +696,35 @@ async function handleCommand(name, args, msg, token) {
     case "stats":
     case "fishstats": {
       const mentioned = getMentionedUser(msg, args);
-      let targetUser = user;
-      let targetId = msg.author.id;
-      let targetName = msg.author.username;
-      
+      let statsTargetUser = user;
+      let statsTargetId = msg.author.id;
+      let statsTargetName = msg.author.username;
+
       if (mentioned) {
-        targetId = mentioned.id;
-        targetName = mentioned.username;
-        targetUser = getUser(eco, targetId);
+        statsTargetId = mentioned.id;
+        statsTargetName = mentioned.username;
+        statsTargetUser = getUser(eco, statsTargetId);
       }
-      
-      const fishCount = Object.values(targetUser.fishInventory).reduce((sum, qty) => sum + qty, 0);
-      const itemCount = Object.values(targetUser.itemInventory).reduce((sum, qty) => sum + qty, 0);
-      const joinedDate = new Date(targetUser.joinedAt).toLocaleDateString();
-      const status = targetUser.blacklisted ? "🚫 Blacklisted" : targetUser.whitelisted ? "✅ Whitelisted" : "⚪ Normal User";
-      
+
+      const fishCount = Object.values(statsTargetUser.fishInventory).reduce((sum, qty) => sum + qty, 0);
+      const itemCount = Object.values(statsTargetUser.itemInventory).reduce((sum, qty) => sum + qty, 0);
+      const joinedDate = new Date(statsTargetUser.joinedAt).toLocaleDateString();
+      const statusLabel = statsTargetUser.blacklisted ? "🚫 Blacklisted" : statsTargetUser.whitelisted ? "✅ Whitelisted" : "⚪ Normal User";
+
       const lines = [
-        `📊 **${targetName}**'s Stats`,
-        `🆔 User ID: \`${targetId}\``,
+        `📊 **${statsTargetName}**'s Stats`,
+        `🆔 User ID: \`${statsTargetId}\``,
         `📅 Joined: **${joinedDate}**`,
-        `${status}`,
+        `${statusLabel}`,
         "",
-        `💰 Balance: **${targetUser.balance.toLocaleString()} sincoins**`,
-        `🎣 Total fish caught: **${targetUser.totalFishCaught}**`,
-        `⭐ Rare or better catches: **${targetUser.totalRareCaught}**`,
+        `💰 Balance: **${statsTargetUser.balance.toLocaleString()} sincoins**`,
+        `🎣 Total fish caught: **${statsTargetUser.totalFishCaught}**`,
+        `⭐ Rare or better catches: **${statsTargetUser.totalRareCaught}**`,
         `🐟 Total fish in inventory: **${fishCount}**`,
-        `🎁 Lootboxes opened: **${targetUser.totalLootboxesOpened}**`,
-        `🧸 Collectibles owned: **${Object.keys(targetUser.itemInventory).length}** types (${itemCount} total)`,
-        `👥 Following: **${targetUser.following.length}** | Followers: **${targetUser.followers.length}**`,
-        `🏅 Achievements earned: **${targetUser.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
+        `🎁 Lootboxes opened: **${statsTargetUser.totalLootboxesOpened}**`,
+        `🧸 Collectibles owned: **${Object.keys(statsTargetUser.itemInventory).length}** types (${itemCount} total)`,
+        `👥 Following: **${statsTargetUser.following.length}** | Followers: **${statsTargetUser.followers.length}**`,
+        `🏅 Achievements earned: **${statsTargetUser.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
       ];
       await send(ch, lines.join("\n"), token);
       break;
@@ -712,11 +744,109 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
-    case "dev": {
-      if (!isOwner(msg.author.id)) {
-        await send(ch, "This command is owner only.", token);
+    case "work": {
+      const now = Date.now();
+      if (now < (user.workCooldown || 0) + WORK_COOLDOWN_MS) {
+        const wait = (user.workCooldown + WORK_COOLDOWN_MS) - now;
+        const hours = Math.floor(wait / (60 * 60 * 1000));
+        const mins = Math.floor((wait % (60 * 60 * 1000)) / (60 * 1000));
+        await send(ch, `⏳ You already worked recently. Come back in **${hours}h ${mins}m**.`, token);
         break;
       }
+      const job = WORK_JOBS[Math.floor(Math.random() * WORK_JOBS.length)];
+      const pay = Math.floor(Math.random() * (job.maxPay - job.minPay + 1)) + job.minPay;
+      user.balance += pay;
+      user.workCooldown = now;
+      saveUser();
+      await send(ch, [
+        `💼 **${msg.author.username}** worked as a **${job.name}**!`,
+        `> ${job.description}`,
+        `💰 Earned: **${pay.toLocaleString()} sincoins** | Balance: **${user.balance.toLocaleString()} sincoins**`,
+        `⏳ You can work again in **12 hours**.`,
+      ].join("\n"), token);
+      break;
+    }
+
+    case "warn": {
+      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ Only moderators can warn users.", token); break; }
+      const warnTarget = getMentionedUser(msg, args);
+      if (!warnTarget) { await send(ch, `Usage: \`${PREFIX}warn @user <reason>\``, token); break; }
+      const warnReason = args.slice(args.findIndex((a) => parseMention(a.trim())) !== -1 ? args.findIndex((a) => parseMention(a.trim())) + 1 : 1).join(" ").trim();
+      if (!warnReason) { await send(ch, `❌ Please provide a reason. Usage: \`${PREFIX}warn @user <reason>\``, token); break; }
+      const warnedUser = getUser(eco, warnTarget.id);
+      if (!warnedUser.warnings) warnedUser.warnings = [];
+      warnedUser.warnings.push({ reason: warnReason, by: msg.author.id, byName: msg.author.username, timestamp: Date.now() });
+      saveEconomy(eco);
+      await send(ch, [
+        `⚠️ **${warnTarget.username}** has been warned.`,
+        `📝 Reason: **${warnReason}**`,
+        `📊 Total warnings: **${warnedUser.warnings.length}**`,
+      ].join("\n"), token);
+      break;
+    }
+
+    case "warncheck": {
+      const warnCheckTarget = getMentionedUser(msg, args);
+      if (!warnCheckTarget) { await send(ch, `Usage: \`${PREFIX}warncheck @user\``, token); break; }
+      const warnCheckUser = getUser(eco, warnCheckTarget.id);
+      const warns = warnCheckUser.warnings || [];
+      if (warns.length === 0) {
+        await send(ch, `✅ **${warnCheckTarget.username}** has no warnings.`, token);
+        break;
+      }
+      const warnLines = warns.map((w, i) => {
+        const date = new Date(w.timestamp).toLocaleString();
+        return `**${i + 1}.** ${w.reason}\n   › by **${w.byName ?? `<@${w.by}>`}** on ${date}`;
+      });
+      await send(ch, [`⚠️ **${warnCheckTarget.username}**'s Warnings (${warns.length} total)`, "", ...warnLines].join("\n"), token);
+      break;
+    }
+
+    case "kick": {
+      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ Only moderators can kick users.", token); break; }
+      if (!targetId) { await send(ch, `Usage: \`${PREFIX}kick @user [reason]\``, token); break; }
+      if (!msg.guild_id) { await send(ch, "❌ This command can only be used in a server.", token); break; }
+      const kickReason = args.slice(1).join(" ").trim() || "No reason provided";
+      const kickName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
+      try {
+        await apiRequest("DELETE", `/guilds/${msg.guild_id}/members/${targetId}`, undefined, token);
+        await send(ch, [`👢 **${kickName}** has been kicked from the server.`, `📝 Reason: **${kickReason}**`].join("\n"), token);
+      } catch (err) {
+        await send(ch, `❌ Failed to kick: ${err.message}`, token);
+      }
+      break;
+    }
+
+    case "ban": {
+      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ Only moderators can ban users.", token); break; }
+      if (!targetId) { await send(ch, `Usage: \`${PREFIX}ban @user [reason]\``, token); break; }
+      if (!msg.guild_id) { await send(ch, "❌ This command can only be used in a server.", token); break; }
+      const banReason = args.slice(1).join(" ").trim() || "No reason provided";
+      const banName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
+      try {
+        await apiRequest("PUT", `/guilds/${msg.guild_id}/bans/${targetId}`, { reason: banReason }, token);
+        await send(ch, [`🔨 **${banName}** has been banned from the server.`, `📝 Reason: **${banReason}**`].join("\n"), token);
+      } catch (err) {
+        await send(ch, `❌ Failed to ban: ${err.message}`, token);
+      }
+      break;
+    }
+
+    case "poll": {
+      const rawPoll = args.join(" ");
+      const pollOptions = rawPoll.split("|").map((s) => s.trim()).filter(Boolean);
+      if (pollOptions.length < 2) {
+        await send(ch, `Usage: \`${PREFIX}poll Yes | No\` (separate options with \`|\`)`, token);
+        break;
+      }
+      const numberEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+      const optionLines = pollOptions.slice(0, 10).map((opt, i) => `${numberEmojis[i]} ${opt}`);
+      await send(ch, [`📊 **Poll by ${msg.author.username}**`, "", ...optionLines, "", "*React to vote!*"].join("\n"), token);
+      break;
+    }
+
+    case "dev": {
+      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ This command is for owners and whitelisted moderators only.", token); break; }
       const sub = args[0]?.toLowerCase();
       if (!sub) {
         await send(ch, [
@@ -774,10 +904,7 @@ async function handleCommand(name, args, msg, token) {
     }
 
     case "owner": {
-      if (!isOwner(msg.author.id)) {
-        await send(ch, "This command is owner only.", token);
-        break;
-      }
+      if (!isOwner(msg.author.id)) { await send(ch, "This command is owner only.", token); break; }
       await send(ch, "Hello, owner! You have access to this command.", token);
       break;
     }
@@ -822,6 +949,14 @@ async function startBot(token, selfId) {
           }
           if (t === "PRESENCE_UPDATE" && d.user?.id && d.status) presenceMap.set(d.user.id, d.status);
           if (t === "GUILD_CREATE") for (const p of d.presences ?? []) { if (p.user?.id && p.status) presenceMap.set(p.user.id, p.status); }
+          if (t === "GUILD_MEMBER_ADD" && AUTO_ROLE_ID && d.guild_id && d.user?.id) {
+            try {
+              await apiRequest("PUT", `/guilds/${d.guild_id}/members/${d.user.id}/roles/${AUTO_ROLE_ID}`, undefined, token);
+              console.log(`[AutoRole] Assigned role ${AUTO_ROLE_ID} to ${d.user.username} (${d.user.id})`);
+            } catch (err) {
+              console.error(`[AutoRole] Failed to assign role: ${err.message}`);
+            }
+          }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
             const content = (msg.content ?? "").trim();
