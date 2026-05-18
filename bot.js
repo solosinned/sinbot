@@ -73,7 +73,7 @@ const FISH_RARITY_BOOST = {
 };
 
 const JOKES = [
-
+  "Why don't scientists trust atoms? Because they make up everything!",
   "What do you call a fish wearing a bowtie? So-fish-ticated!",
   "Why did the scarecrow win an award? He was outstanding in his field!",
   "What do you call a bear with no teeth? A gummy bear!",
@@ -308,6 +308,23 @@ function openLootbox(boxKey) {
   const pool = COLLECTIBLE_ITEMS.filter((item) => allowedRarities.includes(item.rarity)).map((item) => ({ ...item, weight: { common: 50, uncommon: 30, rare: 12, epic: 6, legendary: 2 }[item.rarity] || 1 }));
   return weightedRandom(pool);
 }
+
+// ─── Rotating statuses ────────────────────────────────────────────────────────
+const ROTATING_STATUSES = [
+  { name: "recording Roblox", type: 0 },
+  { name: "editing a video", type: 0 },
+  { name: "overseeing servers", type: 0 },
+  { name: "streaming to no one", type: 0 },
+  { name: "reading chat logs", type: 0 },
+  { name: "moderating the server", type: 0 },
+  { name: "responding to DMs", type: 0 },
+  { name: "planning world domination", type: 0 },
+  { name: "debugging the bot", type: 0 },
+  { name: "watching your every move", type: 3 },
+  { name: "lo-fi beats to chill to", type: 2 },
+  { name: "uploading a new video", type: 0 },
+  { name: "Minecraft at 3am", type: 0 },
+];
 
 // ─── Presence tracking ────────────────────────────────────────────────────────
 const presenceMap = new Map();
@@ -917,8 +934,14 @@ async function handleCommand(name, args, msg, token) {
 // ─── Bot ──────────────────────────────────────────────────────────────────────
 async function startBot(token, selfId) {
   let heartbeatInterval = null;
+  let statusInterval = null;
+  let statusIndex = 0;
   let sequence = null;
   let reconnectDelay = 1000;
+
+  function buildPresence(activity) {
+    return { op: 3, d: { since: null, status: "online", afk: false, activities: [{ name: activity.name, type: activity.type }] } };
+  }
 
   function connect() {
     console.log("[Gateway] Connecting...");
@@ -935,7 +958,15 @@ async function startBot(token, selfId) {
           const { heartbeat_interval } = payload.d;
           if (heartbeatInterval) clearInterval(heartbeatInterval);
           heartbeatInterval = setInterval(() => ws.send(JSON.stringify({ op: 1, d: sequence })), heartbeat_interval);
-          ws.send(JSON.stringify({ op: 2, d: { token, properties: { $os: "linux", $browser: "sinbot", $device: "sinbot" }, presence: { status: "online", activities: [{ name: `${PREFIX}help`, type: 0 }], afk: false } } }));
+          const firstStatus = ROTATING_STATUSES[0];
+          ws.send(JSON.stringify({ op: 2, d: { token, properties: { $os: "linux", $browser: "sinbot", $device: "sinbot" }, presence: { status: "online", activities: [{ name: firstStatus.name, type: firstStatus.type }], afk: false } } }));
+          if (statusInterval) clearInterval(statusInterval);
+          statusInterval = setInterval(() => {
+            statusIndex = (statusIndex + 1) % ROTATING_STATUSES.length;
+            const next = ROTATING_STATUSES[statusIndex];
+            try { ws.send(JSON.stringify(buildPresence(next))); } catch {}
+            console.log(`[Status] Now: ${next.type === 2 ? "Listening to" : next.type === 3 ? "Watching" : "Playing"} ${next.name}`);
+          }, 3 * 60 * 1000);
           break;
         }
         case 0: {
@@ -998,6 +1029,7 @@ async function startBot(token, selfId) {
 
     ws.on("close", (code) => {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
       console.log(`[Gateway] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 30000);
