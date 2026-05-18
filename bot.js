@@ -73,7 +73,7 @@ const FISH_RARITY_BOOST = {
 };
 
 const JOKES = [
-  "Why don't scientists trust atoms? Because they make up everything!",
+
   "What do you call a fish wearing a bowtie? So-fish-ticated!",
   "Why did the scarecrow win an award? He was outstanding in his field!",
   "What do you call a bear with no teeth? A gummy bear!",
