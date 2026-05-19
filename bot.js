@@ -993,6 +993,7 @@ async function startBot(token, selfId) {
         case 0: {
           const { t, d } = payload;
           if (t === "READY") {
+            selfId = d.user.id;
             console.log(`[Bot] Logged in as ${d.user.username} (${d.user.id})`);
             console.log(`[Bot] Prefix: "${PREFIX}" | Subscribing to ${d.guilds.length} guild(s)...`);
             for (const guild of d.guilds) {
@@ -1025,6 +1026,7 @@ async function startBot(token, selfId) {
                 const [cmdName, ...args] = withoutPrefix.split(/\s+/);
                 console.log(`[Self Cmd] ${cmdName}`);
                 await handleCommand(cmdName.toLowerCase(), args, msg, token);
+                return;
               }
               return;
             }
