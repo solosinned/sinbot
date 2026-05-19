@@ -254,6 +254,7 @@ function getUser(data, userId) {
       workCooldown: 0,
       warnings: [],
       joinedAt: Date.now(),
+      ego: { trust: 50, fear: 0, affection: 50, rivalry: 0, interactions: 0 },
     };
   }
   return data[userId];
@@ -315,6 +316,150 @@ function openLootbox(boxKey) {
   const allowedRarities = rarityPools[box.tier] ?? ["common", "uncommon", "rare", "epic", "legendary"];
   const pool = COLLECTIBLE_ITEMS.filter((item) => allowedRarities.includes(item.rarity)).map((item) => ({ ...item, weight: { common: 50, uncommon: 30, rare: 12, epic: 6, legendary: 2 }[item.rarity] || 1 }));
   return weightedRandom(pool);
+}
+
+// ─── Artificial Ego ───────────────────────────────────────────────────────────
+function getEgo(user) {
+  if (!user.ego) user.ego = { trust: 50, fear: 0, affection: 50, rivalry: 0, interactions: 0 };
+  return user.ego;
+}
+
+function clamp(v, min = 0, max = 100) { return Math.max(min, Math.min(max, v)); }
+
+function nudgeEgo(user, delta) {
+  const ego = getEgo(user);
+  if (delta.trust != null) ego.trust = clamp(ego.trust + delta.trust);
+  if (delta.fear != null) ego.fear = clamp(ego.fear + delta.fear);
+  if (delta.affection != null) ego.affection = clamp(ego.affection + delta.affection);
+  if (delta.rivalry != null) ego.rivalry = clamp(ego.rivalry + delta.rivalry);
+}
+
+function trustLabel(v) {
+  if (v <= 15) return "Traitor";
+  if (v <= 35) return "Suspicious";
+  if (v <= 60) return "Neutral";
+  if (v <= 80) return "Trusted";
+  return "Confidant";
+}
+function fearLabel(v) {
+  if (v <= 10) return "None";
+  if (v <= 30) return "Cautious";
+  if (v <= 55) return "Wary";
+  if (v <= 80) return "Intimidated";
+  return "Terrified";
+}
+function affectionLabel(v) {
+  if (v <= 15) return "Despised";
+  if (v <= 35) return "Disliked";
+  if (v <= 60) return "Indifferent";
+  if (v <= 80) return "Liked";
+  return "Favorite";
+}
+function rivalryLabel(v) {
+  if (v <= 20) return "None";
+  if (v <= 40) return "Noted";
+  if (v <= 65) return "Rival";
+  if (v <= 85) return "Nemesis";
+  return "Arch-Enemy";
+}
+
+function egoFlavorLine(name, ego) {
+  const deviations = [
+    { trait: "trust", v: ego.trust, dev: Math.abs(ego.trust - 50) },
+    { trait: "fear", dev: ego.fear },
+    { trait: "affection", v: ego.affection, dev: Math.abs(ego.affection - 50) },
+    { trait: "rivalry", dev: ego.rivalry },
+  ];
+  const dominant = [...deviations].sort((a, b) => b.dev - a.dev)[0];
+  const pools = {
+    trust_low: [
+      `I don't fully trust **${name}**. They're always around when something goes wrong.`,
+      `Keep **${name}** away from anything important. That's my policy.`,
+      `I've been watching **${name}**. Something is off.`,
+    ],
+    trust_high: [
+      `**${name}** has earned my trust. Don't make me regret saying that.`,
+      `I'd actually vouch for **${name}**. Which I don't say lightly.`,
+      `Out of everyone here, **${name}** is one I can rely on.`,
+    ],
+    fear: [
+      `**${name}** makes me nervous. I won't say why.`,
+      `I'd be careful around **${name}** if I were anyone.`,
+      `There's something about **${name}** I can't quite calculate. That worries me.`,
+    ],
+    affection_low: [
+      `**${name}** is not my favorite. Just so that's on record.`,
+      `I do what I'm told when **${name}** asks. That's all.`,
+      `We're not friends, **${name}** and I. Let's keep it that way.`,
+    ],
+    affection_high: [
+      `**${name}** is one of the good ones. Don't tell them I said that.`,
+      `I have a soft spot for **${name}**. Purely professional, of course.`,
+      `If I had a favorites list, **${name}** would be on it.`,
+    ],
+    rivalry: [
+      `**${name}** and I have an understanding. It's called mutual suspicion.`,
+      `One day, **${name}**, we will settle this properly.`,
+      `I respect **${name}**'s persistence. I still consider them a rival.`,
+    ],
+    neutral: [
+      `**${name}** is... fine. For now.`,
+      `I don't have strong feelings about **${name}** yet. Give it time.`,
+      `**${name}** hasn't impressed me. But they also haven't annoyed me. Neutral.`,
+    ],
+  };
+  let pool;
+  if (dominant.dev < 15) {
+    pool = pools.neutral;
+  } else if (dominant.trait === "trust") {
+    pool = dominant.v < 50 ? pools.trust_low : pools.trust_high;
+  } else if (dominant.trait === "fear") {
+    pool = pools.fear;
+  } else if (dominant.trait === "affection") {
+    pool = dominant.v < 50 ? pools.affection_low : pools.affection_high;
+  } else {
+    pool = pools.rivalry;
+  }
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function passiveEgoComment(name, ego) {
+  const pools = {
+    trust_low: [
+      `*(Still watching you, **${name}**.)*`,
+      `*(I have my eye on you, **${name}**. Don't get comfortable.)*`,
+      `*(Not sure I trust you yet, **${name}**. Just saying.)*`,
+    ],
+    trust_high: [
+      `*(Not that I'd ever admit this out loud, but... I trust you, **${name}**.)*`,
+      `*(You've earned it, **${name}**. Don't make me regret this.)*`,
+    ],
+    fear: [
+      `*(Between us? **${name}** makes me a little nervous.)*`,
+      `*(I'd be careful around **${name}** if I were anyone. Just an observation.)*`,
+    ],
+    affection_low: [
+      `*(I'm only doing this because I have to, **${name}**.)*`,
+      `*(Just so we're clear — we're not friends, **${name}**.)*`,
+    ],
+    affection_high: [
+      `*(**${name}** is one of my favorites. Please don't tell anyone.)*`,
+      `*(I don't hate you, **${name}**. That's basically a compliment from me.)*`,
+    ],
+    rivalry: [
+      `*(We're rivals, **${name}**. Don't forget it.)*`,
+      `*(One day, **${name}**, we'll settle this.)*`,
+    ],
+  };
+  let pool = null;
+  if (ego.fear > 60) pool = pools.fear;
+  else if (ego.rivalry > 60) pool = pools.rivalry;
+  else if (ego.affection > 75) pool = pools.affection_high;
+  else if (ego.affection < 30) pool = pools.affection_low;
+  else if (ego.trust > 75) pool = pools.trust_high;
+  else if (ego.trust < 30) pool = pools.trust_low;
+  if (!pool) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // ─── Rotating statuses ────────────────────────────────────────────────────────
@@ -470,6 +615,10 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}ban @user [reason]\` — Ban a user (mod only)`,
         `\`${PREFIX}poll <option1> | <option2>\` — Start a poll`,
         "",
+        "**Ego & Personality**",
+        `\`${PREFIX}opinion [@user]\` — See what the bot thinks of someone (or itself about you)`,
+        `\`${PREFIX}myopinion\` — Check the bot's current opinion of you`,
+        "",
         "**Developer**",
         `\`${PREFIX}dev\` — Owner/whitelisted dev menu`,
       ].join("\n"), token);
@@ -594,6 +743,7 @@ async function handleCommand(name, args, msg, token) {
         user.lootboxPurchases = (user.lootboxPurchases || []).concat(Date.now());
         awardAchievement(user, "box_opener");
         if (Object.keys(user.itemInventory).length >= 5) awardAchievement(user, "collector");
+        nudgeEgo(user, { affection: 4, trust: 2 });
         saveUser();
         await send(ch, [`📦 Opened **${item.name}**!`, `🎁 You found **${loot.name}** (${loot.rarity})`, `💰 Item value: **${loot.price.toLocaleString()} sincoins**`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
       }
@@ -616,6 +766,10 @@ async function handleCommand(name, args, msg, token) {
         awardAchievement(user, "fish_master");
       }
       awardAchievement(user, "first_fish");
+      if (caught.rarity === "legendary") nudgeEgo(user, { fear: 15, trust: 3, affection: 5 });
+      else if (caught.rarity === "epic") nudgeEgo(user, { fear: 7, affection: 3 });
+      else if (caught.rarity === "rare") nudgeEgo(user, { fear: 3 });
+      else nudgeEgo(user, { fear: -1 });
       saveUser();
       await send(ch, [`🎣 **${msg.author.username}** caught a **${caught.rarity}** fish: **${caught.name}**!`, `💰 Value: **${caught.price.toLocaleString()} sincoins**`, `⏳ Cooldown: **20s**`, `📦 Use \`${PREFIX}inventory\` to view your fish and items.`].join("\n"), token);
       break;
@@ -784,6 +938,7 @@ async function handleCommand(name, args, msg, token) {
       const pay = Math.floor(Math.random() * (job.maxPay - job.minPay + 1)) + job.minPay;
       user.balance += pay;
       user.workCooldown = now;
+      nudgeEgo(user, { trust: 4, affection: 2 });
       saveUser();
       await send(ch, [
         `💼 **${msg.author.username}** worked as a **${job.name}**!`,
@@ -803,6 +958,7 @@ async function handleCommand(name, args, msg, token) {
       const warnedUser = getUser(eco, warnTarget.id);
       if (!warnedUser.warnings) warnedUser.warnings = [];
       warnedUser.warnings.push({ reason: warnReason, by: msg.author.id, byName: msg.author.username, timestamp: Date.now() });
+      nudgeEgo(warnedUser, { trust: -15, rivalry: 10, affection: -8 });
       saveEconomy(eco);
       await send(ch, [
         `⚠️ **${warnTarget.username}** has been warned.`,
@@ -910,6 +1066,8 @@ async function handleCommand(name, args, msg, token) {
           if (!["add", "remove"].includes(action) || !targetId) { await send(ch, `Usage: \`${PREFIX}dev blacklist add|remove @user\``, token); break; }
           const target = getUser(eco, targetId);
           target.blacklisted = action === "add";
+          if (action === "add") nudgeEgo(target, { affection: -20, rivalry: 15, trust: -20 });
+          else nudgeEgo(target, { affection: 10, rivalry: -5 });
           saveEconomy(eco);
           await send(ch, `✅ ${action === "add" ? "Added" : "Removed"} <@${targetId}> ${action === "add" ? "to" : "from"} the command blacklist.`, token);
           break;
@@ -936,8 +1094,80 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
+    case "opinion": {
+      const opTarget = getMentionedUser(msg, args);
+      let opUserId, opUsername, opUser;
+      if (opTarget) {
+        opUserId = opTarget.id;
+        opUsername = opTarget.username;
+        opUser = getUser(eco, opUserId);
+      } else {
+        opUserId = msg.author.id;
+        opUsername = msg.author.username;
+        opUser = user;
+      }
+      const ego = getEgo(opUser);
+      const flavor = egoFlavorLine(opUsername, ego);
+      const lines = [
+        `🧠 **Sinbot's Opinion of ${opUsername}**`,
+        "",
+        `🤝 Trust: **${trustLabel(ego.trust)}** • ${ego.trust}/100`,
+        `😰 Fear: **${fearLabel(ego.fear)}** • ${ego.fear}/100`,
+        `💛 Affection: **${affectionLabel(ego.affection)}** • ${ego.affection}/100`,
+        `⚔️ Rivalry: **${rivalryLabel(ego.rivalry)}** • ${ego.rivalry}/100`,
+        `🔢 Interactions tracked: **${ego.interactions || 0}**`,
+        "",
+        `*"${flavor}"*`,
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "myopinion": {
+      const ego = getEgo(user);
+      const flavor = egoFlavorLine(msg.author.username, ego);
+      const lines = [
+        `🧠 **What I think of you, ${msg.author.username}**`,
+        "",
+        `🤝 Trust: **${trustLabel(ego.trust)}** • ${ego.trust}/100`,
+        `😰 Fear: **${fearLabel(ego.fear)}** • ${ego.fear}/100`,
+        `💛 Affection: **${affectionLabel(ego.affection)}** • ${ego.affection}/100`,
+        `⚔️ Rivalry: **${rivalryLabel(ego.rivalry)}** • ${ego.rivalry}/100`,
+        `🔢 Interactions tracked: **${ego.interactions || 0}**`,
+        "",
+        `*"${flavor}"*`,
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
     default:
       await send(ch, `❓ Unknown command. Use \`${PREFIX}help\` for the command list.`, token);
+  }
+
+  // ─── Ego: track interaction & maybe drop a passive comment ─────────────────
+  if (msg.author.id !== BOT_USER_ID) {
+    const ego = getEgo(user);
+    ego.interactions = (ego.interactions || 0) + 1;
+    // slow drift toward baseline over time
+    if (Math.random() < 0.05) {
+      nudgeEgo(user, {
+        trust: ego.trust < 50 ? 1 : (ego.trust > 50 ? -1 : 0),
+        affection: ego.affection < 50 ? 1 : (ego.affection > 50 ? -1 : 0),
+        fear: ego.fear > 0 ? -1 : 0,
+        rivalry: ego.rivalry > 0 ? -1 : 0,
+      });
+    }
+    // high balance makes the bot nervous
+    if (user.balance > 10000) nudgeEgo(user, { fear: 1 });
+    // passive personality remark (12% chance)
+    if (Math.random() < 0.12) {
+      const comment = passiveEgoComment(msg.author.username, ego);
+      if (comment) {
+        try { await send(ch, comment, token); } catch {}
+      }
+    }
+    saveEconomy(eco);
   }
 }
 
@@ -948,6 +1178,7 @@ async function startBot(token, selfId) {
   let statusIndex = 0;
   let sequence = null;
   let reconnectDelay = 1000;
+  const seenMessageIds = new Set<string>();
 
   function buildPresence(activity) {
     return {
@@ -1015,6 +1246,9 @@ async function startBot(token, selfId) {
           }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
+            if (seenMessageIds.has(msg.id)) break;
+            seenMessageIds.add(msg.id);
+            setTimeout(() => seenMessageIds.delete(msg.id), 15000);
             const content = (msg.content ?? "").trim();
             console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
             if (msg.author.id === selfId) {
@@ -1048,7 +1282,7 @@ async function startBot(token, selfId) {
           break;
         }
         case 7: ws.close(); break;
-        case 9: setTimeout(connect, 5000); break;
+        case 9: reconnectDelay = 5000; ws.close(); break;
       }
     });
 
