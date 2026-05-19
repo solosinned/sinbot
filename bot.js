@@ -572,6 +572,13 @@ async function handleCommand(name, args, msg, token) {
     saveEconomy(eco);
   }
 
+  // ─── The Void ─────────────────────────────────────────────────────────────
+  const VOID_IMMUNE = new Set(["ping", "help", "info", "dev", "owner", "myopinion"]);
+  if (!VOID_IMMUNE.has(name) && Math.random() < 0.04) {
+    await send(ch, "The void refuses.", token);
+    return;
+  }
+
   switch (name) {
     case "ping":
       await send(ch, "Pong! 🏓", token);
