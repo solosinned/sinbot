@@ -1185,7 +1185,7 @@ async function startBot(token, selfId) {
   let statusIndex = 0;
   let sequence = null;
   let reconnectDelay = 1000;
-  const seenMessageIds = new Set<string>();
+  const seenMessageIds = new Set();
 
   function buildPresence(activity) {
     return {
