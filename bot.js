@@ -482,7 +482,7 @@ const ROTATING_STATUSES = [
 // ─── Presence tracking ────────────────────────────────────────────────────────
 const presenceMap = new Map();
 const recentSentMessages = new Map();
-const DUPLICATE_SEND_WINDOW_MS = 800;
+const DUPLICATE_SEND_WINDOW_MS = 5000;
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 function apiRequest(method, urlPath, body, token) {
@@ -1289,7 +1289,7 @@ async function startBot(token, selfId) {
             // Check if this message was recently processed (within 10 seconds)
             if (recentMessageIds.has(msg.id)) {
               const lastProcessedTime = recentMessageIds.get(msg.id);
-              if (now - lastProcessedTime < 10000) return;
+              if (now - lastProcessedTime < 60000) return;
             }
             
             // Check if currently being processed
@@ -1299,6 +1299,7 @@ async function startBot(token, selfId) {
             try {
               const content = (msg.content ?? "").trim();
               console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
+              if (msg.author.bot && msg.author.id !== selfId) return;
               if (msg.author.id === selfId) {
                 const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
                 if (prefix) {
