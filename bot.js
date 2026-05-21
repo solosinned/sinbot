@@ -1185,7 +1185,7 @@ async function startBot(token, selfId) {
   let statusIndex = 0;
   let sequence = null;
   let reconnectDelay = 1000;
-  const seenMessageIds = new Set();
+  const processingMessageIds = new Set();
 
   function buildPresence(activity) {
     return {
@@ -1253,38 +1253,41 @@ async function startBot(token, selfId) {
           }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
-            if (seenMessageIds.has(msg.id)) return;
-            seenMessageIds.add(msg.id);
-            setTimeout(() => seenMessageIds.delete(msg.id), 5000);
-            const content = (msg.content ?? "").trim();
-            console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
-            if (msg.author.id === selfId) {
+            if (processingMessageIds.has(msg.id)) return;
+            processingMessageIds.add(msg.id);
+            try {
+              const content = (msg.content ?? "").trim();
+              console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
+              if (msg.author.id === selfId) {
+                const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
+                if (prefix) {
+                  const withoutPrefix = content.slice(prefix.length).trim();
+                  if (!withoutPrefix) return;
+                  const [cmdName, ...args] = withoutPrefix.split(/\s+/);
+                  console.log(`[Self Cmd] ${cmdName}`);
+                  await handleCommand(cmdName.toLowerCase(), args, msg, token);
+                }
+                return;
+              }
               const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
               if (prefix) {
+                const eco = loadEconomy();
+                const callingUser = getUser(eco, msg.author.id);
+                if (callingUser.blacklisted && !isOwner(msg.author.id)) {
+                  await send(msg.channel_id, "🚫 You are currently blacklisted from using commands.", token);
+                  return;
+                }
                 const withoutPrefix = content.slice(prefix.length).trim();
                 if (!withoutPrefix) return;
                 const [cmdName, ...args] = withoutPrefix.split(/\s+/);
-                console.log(`[Self Cmd] ${cmdName}`);
+                console.log(`[Cmd] ${cmdName}`);
                 await handleCommand(cmdName.toLowerCase(), args, msg, token);
-              }
-              return;
-            }
-            const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
-            if (prefix) {
-              const eco = loadEconomy();
-              const callingUser = getUser(eco, msg.author.id);
-              if (callingUser.blacklisted && !isOwner(msg.author.id)) {
-                await send(msg.channel_id, "🚫 You are currently blacklisted from using commands.", token);
                 return;
               }
-              const withoutPrefix = content.slice(prefix.length).trim();
-              if (!withoutPrefix) return;
-              const [cmdName, ...args] = withoutPrefix.split(/\s+/);
-              console.log(`[Cmd] ${cmdName}`);
-              await handleCommand(cmdName.toLowerCase(), args, msg, token);
-              return;
+              if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
+            } finally {
+              processingMessageIds.delete(msg.id);
             }
-            if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
           }
           break;
         }
