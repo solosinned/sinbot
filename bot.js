@@ -1185,6 +1185,7 @@ async function startBot(token, selfId) {
   let statusIndex = 0;
   let sequence = null;
   let reconnectDelay = 1000;
+  let currentWs = null;
   const processingMessageIds = new Set();
   const recentMessageIds = new Map(); // Track message IDs with timestamp
 
@@ -1204,8 +1205,14 @@ async function startBot(token, selfId) {
   }
 
   function connect() {
+    // Close previous connection if still open
+    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+      currentWs.close(1000, "Reconnecting");
+    }
+    
     console.log("[Gateway] Connecting...");
     const ws = new WebSocket(GATEWAY_URL, { headers: { Origin: "https://hmus.sys42.net" } });
+    currentWs = ws;
 
     ws.on("open", () => { console.log("[Gateway] Connected"); reconnectDelay = 1000; });
 
