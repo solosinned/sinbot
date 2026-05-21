@@ -481,6 +481,8 @@ const ROTATING_STATUSES = [
 
 // ─── Presence tracking ────────────────────────────────────────────────────────
 const presenceMap = new Map();
+const recentSentMessages = new Map();
+const DUPLICATE_SEND_WINDOW_MS = 800;
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 function apiRequest(method, urlPath, body, token) {
@@ -556,6 +558,22 @@ async function login() {
 
 // ─── Send message ─────────────────────────────────────────────────────────────
 async function send(channelId, content, token) {
+  const now = Date.now();
+  const key = `${channelId}:${content}`;
+  const lastSent = recentSentMessages.get(key);
+  if (lastSent && now - lastSent < DUPLICATE_SEND_WINDOW_MS) {
+    console.log(`[Send] Suppressed duplicate message to ${channelId}`);
+    return;
+  }
+  recentSentMessages.set(key, now);
+
+  // Prune old sent message records occasionally.
+  if (recentSentMessages.size > 200) {
+    for (const [recordKey, timestamp] of recentSentMessages) {
+      if (now - timestamp > 30000) recentSentMessages.delete(recordKey);
+    }
+  }
+
   await apiRequest("POST", `/channels/${channelId}/messages`, { content }, token);
 }
 
