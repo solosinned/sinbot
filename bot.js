@@ -1253,7 +1253,7 @@ async function startBot(token, selfId) {
           }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
-            if (seenMessageIds.has(msg.id)) break;
+            if (seenMessageIds.has(msg.id)) return;
             seenMessageIds.add(msg.id);
             setTimeout(() => seenMessageIds.delete(msg.id), 15000);
             const content = (msg.content ?? "").trim();
