@@ -1255,7 +1255,7 @@ async function startBot(token, selfId) {
             const msg = d;
             if (seenMessageIds.has(msg.id)) return;
             seenMessageIds.add(msg.id);
-            setTimeout(() => seenMessageIds.delete(msg.id), 15000);
+            setTimeout(() => seenMessageIds.delete(msg.id), 5000);
             const content = (msg.content ?? "").trim();
             console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
             if (msg.author.id === selfId) {
