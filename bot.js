@@ -1205,18 +1205,23 @@ async function startBot(token, selfId) {
   }
 
   function connect() {
-    // Close previous connection if still open
-    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-      currentWs.close(1000, "Reconnecting");
+    // Close previous connection if still open or closing
+    if (currentWs && currentWs.readyState !== WebSocket.CLOSED) {
+      try { currentWs.close(1000, "Reconnecting"); } catch (err) { console.error("[Gateway] Failed to close previous socket:", err.message); }
     }
     
     console.log("[Gateway] Connecting...");
     const ws = new WebSocket(GATEWAY_URL, { headers: { Origin: "https://hmus.sys42.net" } });
     currentWs = ws;
 
-    ws.on("open", () => { console.log("[Gateway] Connected"); reconnectDelay = 1000; });
+    ws.on("open", () => {
+      if (ws !== currentWs) return;
+      console.log("[Gateway] Connected");
+      reconnectDelay = 1000;
+    });
 
     ws.on("message", async (raw) => {
+      if (ws !== currentWs) return;
       const payload = JSON.parse(raw.toString());
       if (payload.s != null) sequence = payload.s;
 
@@ -1310,20 +1315,32 @@ async function startBot(token, selfId) {
           }
           break;
         }
-        case 7: ws.close(); break;
-        case 9: reconnectDelay = 5000; ws.close(); break;
+        case 7:
+          if (ws === currentWs) ws.close();
+          break;
+        case 9:
+          if (ws === currentWs) {
+            reconnectDelay = 5000;
+            ws.close();
+          }
+          break;
       }
     });
 
     ws.on("close", (code) => {
+      if (ws !== currentWs) return;
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
       console.log(`[Gateway] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
+      currentWs = null;
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 30000);
     });
 
-    ws.on("error", (err) => console.error("[Gateway] Error:", err.message));
+    ws.on("error", (err) => {
+      if (ws !== currentWs) return;
+      console.error("[Gateway] Error:", err.message);
+    });
   }
 
   connect();
