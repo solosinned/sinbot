@@ -1206,6 +1206,7 @@ async function startBot(token, selfId) {
   let currentWs = null;
   const processingMessageIds = new Set();
   const recentMessageIds = new Map(); // Track message IDs with timestamp
+  const recentCommandInvocations = new Map(); // Track duplicate command content
 
   function buildPresence(activity) {
     return {
@@ -1303,6 +1304,19 @@ async function startBot(token, selfId) {
               if (msg.author.id === selfId) {
                 const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
                 if (prefix) {
+                  const commandKey = `${msg.author.id}:${msg.channel_id}:${content}`;
+                  const lastInvocation = recentCommandInvocations.get(commandKey);
+                  if (lastInvocation && now - lastInvocation < 5000) {
+                    console.log(`[Self Cmd] Suppressed duplicate invocation: ${commandKey}`);
+                    return;
+                  }
+                  recentCommandInvocations.set(commandKey, now);
+                  if (recentCommandInvocations.size > 200) {
+                    for (const [recordKey, recordTime] of recentCommandInvocations) {
+                      if (now - recordTime > 60000) recentCommandInvocations.delete(recordKey);
+                    }
+                  }
+
                   const withoutPrefix = content.slice(prefix.length).trim();
                   if (!withoutPrefix) return;
                   const [cmdName, ...args] = withoutPrefix.split(/\s+/);
@@ -1313,6 +1327,19 @@ async function startBot(token, selfId) {
               }
               const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
               if (prefix) {
+                const commandKey = `${msg.author.id}:${msg.channel_id}:${content}`;
+                const lastInvocation = recentCommandInvocations.get(commandKey);
+                if (lastInvocation && now - lastInvocation < 5000) {
+                  console.log(`[Cmd] Suppressed duplicate invocation: ${commandKey}`);
+                  return;
+                }
+                recentCommandInvocations.set(commandKey, now);
+                if (recentCommandInvocations.size > 200) {
+                  for (const [recordKey, recordTime] of recentCommandInvocations) {
+                    if (now - recordTime > 60000) recentCommandInvocations.delete(recordKey);
+                  }
+                }
+
                 const eco = loadEconomy();
                 const callingUser = getUser(eco, msg.author.id);
                 if (callingUser.blacklisted && !isOwner(msg.author.id)) {
