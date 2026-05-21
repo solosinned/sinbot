@@ -15,7 +15,7 @@ const GATEWAY_URL = "wss://hummus-gateway.sys42.net/?encoding=json&v=6";
 // ─── Config (set these as environment variables on Railway) ───────────────────
 const EMAIL = process.env.BOT_EMAIL ?? "";
 const PASSWORD = process.env.BOT_PASSWORD ?? "";
-const PREFIX = process.env.BOT_PREFIX ?? "s!";
+const PREFIX = process.env.BOT_PREFIX ?? "s.";
 const AUTO_REPLY = process.env.BOT_AUTO_REPLY === "true";
 const AUTO_REPLY_MESSAGE = process.env.BOT_AUTO_REPLY_MESSAGE ?? "Hello! I'm a bot.";
 const OWNER_ID = process.env.OWNER_ID ?? "";
@@ -45,7 +45,7 @@ function getOpenAI() {
 
 // ─── Economy storage ──────────────────────────────────────────────────────────
 const ECONOMY_FILE = path.join(__dirname, "economy.json");
-const ALT_PREFIX = "!";
+const ALT_PREFIX = "s.";
 const FISH_COOLDOWN_MS = 20 * 1000;
 const WORK_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
