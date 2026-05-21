@@ -1186,6 +1186,7 @@ async function startBot(token, selfId) {
   let sequence = null;
   let reconnectDelay = 1000;
   const processingMessageIds = new Set();
+  const recentMessageIds = new Map(); // Track message IDs with timestamp
 
   function buildPresence(activity) {
     return {
@@ -1253,8 +1254,18 @@ async function startBot(token, selfId) {
           }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
+            const now = Date.now();
+            
+            // Check if this message was recently processed (within 10 seconds)
+            if (recentMessageIds.has(msg.id)) {
+              const lastProcessedTime = recentMessageIds.get(msg.id);
+              if (now - lastProcessedTime < 10000) return;
+            }
+            
+            // Check if currently being processed
             if (processingMessageIds.has(msg.id)) return;
             processingMessageIds.add(msg.id);
+            
             try {
               const content = (msg.content ?? "").trim();
               console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
@@ -1287,6 +1298,7 @@ async function startBot(token, selfId) {
               if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
             } finally {
               processingMessageIds.delete(msg.id);
+              recentMessageIds.set(msg.id, now);
             }
           }
           break;
