@@ -486,19 +486,31 @@ const presenceMap = new Map();
 function apiRequest(method, urlPath, body, token) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : undefined;
-    const url = new URL(`${API_BASE}${urlPath}`);
-    const lib = url.protocol === "https:" ? https : http;
-    const req = lib.request(url, {
+    const url = new URL(API_BASE + urlPath);
+    const isHttps = url.protocol === "https:";
+    const client = isHttps ? https : http;
+    const options = {
       method,
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: token } : {}),
+        Authorization: token,
         ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
       },
-    }, (res) => {
-      let raw = "";
-      res.on("data", (chunk) => (raw += chunk));
-      res.on("end", () => { try { resolve(JSON.parse(raw)); } catch { resolve(raw); } });
+    };
+    const req = client.request(url, options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        if (res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+        } else {
+          try {
+            resolve(body ? JSON.parse(body) : null);
+          } catch {
+            resolve(body);
+          }
+        }
+      });
     });
     req.on("error", reject);
     if (data) req.write(data);
@@ -506,55 +518,31 @@ function apiRequest(method, urlPath, body, token) {
   });
 }
 
-// ─── Mention parsing ──────────────────────────────────────────────────────────
-function parseMention(arg) {
-  const mentionMatch = arg.match(/^<@!?([0-9]+)>$/);
-  if (mentionMatch) return mentionMatch[1];
-  if (/^[0-9]+$/.test(arg)) return arg;
-  return null;
-}
-
-function getMentionedId(args) {
-  for (const arg of args) {
-    const id = parseMention(arg.trim());
-    if (id) return id;
-  }
-  return null;
-}
-
-function getMentionedUser(msg, args) {
-  const mentionId = getMentionedId(args);
-  if (mentionId) {
-    const mentionedUser = msg.mentions.find((m) => m.id === mentionId);
-    return { id: mentionId, username: mentionedUser?.username ?? `User${mentionId}` };
-  }
-  if (msg.mentions && msg.mentions.length > 0) {
-    return { id: msg.mentions[0].id, username: msg.mentions[0].username };
-  }
-  return null;
-}
-
-// ─── Calculator ───────────────────────────────────────────────────────────────
-function calculate(expr) {
-  let cleaned = expr.replace(/[×x]/gi, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/[^0-9+\-*/().\s*]/g, "");
-  if (!cleaned.trim()) return "Invalid expression.";
-  try {
-    const result = Function(`"use strict"; return (${cleaned})`)();
-    if (!isFinite(result)) return "Result is undefined (e.g. divide by zero).";
-    const rounded = Math.round(result * 1e10) / 1e10;
-    return `${expr.replace(/[×x]/gi, "×").replace(/\^/g, "^")} = **${rounded}**`;
-  } catch { return "Could not calculate that expression."; }
-}
-
 // ─── Login ────────────────────────────────────────────────────────────────────
 async function login() {
-  if (!EMAIL || !PASSWORD) { console.error("Error: BOT_EMAIL and BOT_PASSWORD must be set."); process.exit(1); }
-  const res = await apiRequest("POST", "/auth/login", { email: EMAIL, password: PASSWORD });
-  if (!res.token) { console.error("Login failed:", res.message ?? JSON.stringify(res)); process.exit(1); }
+  if (!EMAIL || !PASSWORD) throw new Error("BOT_EMAIL and BOT_PASSWORD must be set.");
+  const res = await apiRequest("POST", "/auth/login", { email: EMAIL, password: PASSWORD }, "");
   return res.token;
 }
 
-// ─── Send message ─────────────────────────────────────────────────────────────
+// ─── Mention parsing ──────────────────────────────────────────────────────────
+function getMentionedId(args) {
+  const mention = args.find((arg) => /^<@!?\d+>$/.test(arg));
+  return mention ? mention.match(/\d+/)[0] : null;
+}
+
+// ─── Math calculator ──────────────────────────────────────────────────────────
+function calculate(expr) {
+  try {
+    const sanitized = expr.replace(/[^0-9+\-*/().x]/g, "").replace(/x/g, "*");
+    const result = Function('"use strict"; return (' + sanitized + ")")();
+    return `**${expr}** = **${result}**`;
+  } catch {
+    return "❌ Invalid expression.";
+  }
+}
+
+// ─── Command handler ──────────────────────────────────────────────────────────
 async function send(channelId, content, token) {
   await apiRequest("POST", `/channels/${channelId}/messages`, { content }, token);
 }
@@ -656,37 +644,29 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
-    case "status":
-    case "online": {
+    case "status": {
       if (!targetId) { await send(ch, `Usage: \`${PREFIX}status @user\``, token); break; }
-      const status = presenceMap.get(targetId);
       const targetName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
+      const status = presenceMap.get(targetId);
       if (!status) {
         await send(ch, `❓ No presence data for **${targetName}** yet.`, token);
       } else {
-        const emoji = { online: "🟢", idle: "🟡", dnd: "🔴", offline: "⚫", invisible: "⚫" };
+        const emoji = { online: "🟢", idle: "🟡", dnd: "🔴", offline: "⚫" };
         await send(ch, `${emoji[status] ?? "❓"} **${targetName}** is actually **${status}**.`, token);
       }
       break;
     }
 
-    case "ai":
-    case "ask": {
+    case "ai": {
+      if (!question) { await send(ch, `Usage: \`${PREFIX}ai <question>\``, token); break; }
       const question = text;
       if (!question) { await send(ch, `Usage: \`${PREFIX}ai <question>\``, token); break; }
       const openai = getOpenAI();
       if (!openai) { await send(ch, "❌ AI is not configured. Set `OPENAI_API_KEY` to enable it.", token); break; }
       await send(ch, "🤔 Thinking...", token);
       try {
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          max_tokens: 500,
-          messages: [
-            { role: "system", content: "You are a helpful assistant in a chat app. Keep responses concise and under 1800 characters. Use plain text, no markdown headers." },
-            { role: "user", content: question },
-          ],
-        });
-        const answer = response.choices[0]?.message?.content ?? "I couldn't generate a response.";
+        const response = await openai.chat.completions.create({ model: "gpt-3.5-turbo", messages: [{ role: "user", content: question }], max_tokens: 500 });
+        const answer = response.choices[0].message.content;
         await send(ch, `**Q: ${question}**\n\n${answer}`, token);
       } catch (err) {
         await send(ch, `❌ AI error: ${err.message}`, token);
@@ -694,491 +674,277 @@ async function handleCommand(name, args, msg, token) {
       break;
     }
 
-    case "balance":
-    case "bal":
-    case "coins": {
-      const fishLuckDesc = user.upgrades?.fishLuck ? ` | Fishing bonus: +${user.upgrades.fishLuck} rare odds` : "";
+    case "balance": {
+      const fishLuckDesc = user.upgrades?.fishLuck ? ` | 🎣 Fish Luck: +${user.upgrades.fishLuck}` : "";
       await send(ch, `💰 **${msg.author.username}** has **${user.balance.toLocaleString()} sincoins**${fishLuckDesc}`, token);
       break;
     }
 
     case "shop": {
-      const lines = [`🛒 **Sincoin Shop** | Balance: **${user.balance.toLocaleString()} sincoins**`, "", ...Object.entries(SHOP_ITEMS).map(([key, item]) => {
-        const price = item.cost.toLocaleString();
-        const label = item.type === "lootbox" ? "Lootbox" : item.type === "upgrade" ? "Upgrade" : item.type === "multiplier" ? "Multiplier" : "Item";
-        return `\`${PREFIX}buy ${key}\` — **${item.name}** — ${price} sincoins (${label})\n  › ${item.description}`;
-      })];
-      lines.push("", `*Lootboxes open items instantly when purchased.*`);
+      const lines = ["**Sinbot Shop**", ""];
+      for (const [key, item] of Object.entries(SHOP_ITEMS)) {
+        lines.push(`\`${key}\` — **${item.name}** (${item.cost.toLocaleString()} sincoins) — ${item.description}`);
+      }
+      lines.push("", `Use \`${PREFIX}buy <item>\` to purchase.`);
       await send(ch, lines.join("\n"), token);
       break;
     }
 
     case "buy": {
-      const itemKey = args[0]?.toLowerCase();
+      const itemKey = text.toLowerCase();
       if (!itemKey || !SHOP_ITEMS[itemKey]) { await send(ch, `❌ Unknown item. Use \`${PREFIX}shop\` to see available items.`, token); break; }
       const item = SHOP_ITEMS[itemKey];
       if (user.balance < item.cost) { await send(ch, `❌ You need **${item.cost.toLocaleString()} sincoins** but only have **${user.balance.toLocaleString()}**.`, token); break; }
-
-      if (item.type === "lootbox") {
+      user.balance -= item.cost;
+      if (item.type === "upgrade") {
+        if (!user.upgrades) user.upgrades = {};
+        user.upgrades.fishLuck = (user.upgrades.fishLuck ?? 0) + item.upgrade.fishLuck;
+        saveUser();
+        await send(ch, `✅ Purchased **${item.name}**!\n💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**\n🚀 You now have a **${user.multiplier}x multiplier**.\n⚠️ Note: multiplier items are currently not linked to a daily reward.`, token);
+      } else if (item.type === "lootbox") {
         const now = Date.now();
-        const fifteenHoursMs = 15 * 60 * 60 * 1000;
-        const recentPurchases = (user.lootboxPurchases || []).filter((time) => now - time < fifteenHoursMs);
+        const fifteenHoursAgo = now - 15 * 60 * 60 * 1000;
+        const recentPurchases = (user.lootboxPurchases ?? []).filter((t) => t > fifteenHoursAgo);
         if (recentPurchases.length >= 12) {
+          user.balance += item.cost;
           const oldestPurchase = Math.min(...recentPurchases);
-          const waitTime = oldestPurchase + fifteenHoursMs - now;
-          const hours = Math.floor(waitTime / (60 * 60 * 1000));
-          const minutes = Math.floor((waitTime % (60 * 60 * 1000)) / (60 * 1000));
+          const timeUntilReset = oldestPurchase + 15 * 60 * 60 * 1000 - now;
+          const hours = Math.floor(timeUntilReset / (60 * 60 * 1000));
+          const minutes = Math.floor((timeUntilReset % (60 * 60 * 1000)) / (60 * 1000));
           await send(ch, `⏳ You've reached your lootbox limit (12 per 15 hours). Try again in **${hours}h ${minutes}m**.`, token);
           break;
         }
-      }
-
-      user.balance -= item.cost;
-      if (item.type === "multiplier") {
-        user.multiplier = item.multiplier;
-        saveUser();
-        await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `🚀 You now have a **${user.multiplier}x multiplier**.`, `⚠️ Note: multiplier items are currently not linked to a daily reward.`].join("\n"), token);
-      } else if (item.type === "upgrade") {
-        Object.entries(item.upgrade).forEach(([key, value]) => { user.upgrades[key] = (user.upgrades[key] || 0) + value; });
-        saveUser();
-        await send(ch, [`✅ Purchased **${item.name}**!`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, `✨ Your fishing odds for rarer fish have improved!`].join("\n"), token);
-      } else if (item.type === "lootbox") {
-        const loot = openLootbox(itemKey);
-        if (!loot) { await send(ch, `❌ Something went wrong opening **${item.name}**.`, token); break; }
-        user.itemInventory[loot.name] = (user.itemInventory[loot.name] || 0) + 1;
-        user.totalLootboxesOpened += 1;
-        user.lootboxPurchases = (user.lootboxPurchases || []).concat(Date.now());
+        user.lootboxPurchases = [...recentPurchases, now];
+        user.totalLootboxesOpened = (user.totalLootboxesOpened ?? 0) + 1;
         awardAchievement(user, "box_opener");
-        if (Object.keys(user.itemInventory).length >= 5) awardAchievement(user, "collector");
-        nudgeEgo(user, { affection: 4, trust: 2 });
+        const loot = openLootbox(itemKey);
+        if (!loot) {
+          user.balance += item.cost;
+          await send(ch, `❌ Something went wrong opening **${item.name}**.`, token);
+          break;
+        }
+        if (!user.itemInventory) user.itemInventory = {};
+        user.itemInventory[loot.name] = (user.itemInventory[loot.name] ?? 0) + 1;
         saveUser();
-        await send(ch, [`📦 Opened **${item.name}**!`, `🎁 You found **${loot.name}** (${loot.rarity})`, `💰 Item value: **${loot.price.toLocaleString()} sincoins**`, `💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
+        await send(ch, `📦 Opened **${item.name}**!\n🎁 You found **${loot.name}** (${loot.rarity})\n💰 Item value: **${loot.price.toLocaleString()} sincoins**\n💰 Remaining balance: **${user.balance.toLocaleString()} sincoins**`, token);
       }
       break;
     }
 
     case "fish": {
       const now = Date.now();
-      if (now < user.fishCooldown + FISH_COOLDOWN_MS) {
-        const wait = (user.fishCooldown + FISH_COOLDOWN_MS) - now;
+      const wait = user.fishCooldown - now;
+      if (wait > 0) {
         await send(ch, `⏳ You need to wait ${formatDuration(wait)} before fishing again.`, token);
         break;
       }
-      const caught = weightedRandom(getFishPool(user));
-      user.fishInventory[caught.name] = (user.fishInventory[caught.name] || 0) + 1;
-      user.fishCooldown = now;
-      user.totalFishCaught += 1;
-      if (["rare", "epic", "legendary"].includes(caught.rarity)) {
-        user.totalRareCaught += 1;
-        awardAchievement(user, "fish_master");
-      }
+      user.fishCooldown = now + FISH_COOLDOWN_MS;
+      const pool = getFishPool(user);
+      const caught = weightedRandom(pool);
+      if (!user.fishInventory) user.fishInventory = {};
+      user.fishInventory[caught.name] = (user.fishInventory[caught.name] ?? 0) + 1;
+      user.totalFishCaught = (user.totalFishCaught ?? 0) + 1;
+      if (caught.rarity !== "common") user.totalRareCaught = (user.totalRareCaught ?? 0) + 1;
       awardAchievement(user, "first_fish");
-      if (caught.rarity === "legendary") nudgeEgo(user, { fear: 15, trust: 3, affection: 5 });
-      else if (caught.rarity === "epic") nudgeEgo(user, { fear: 7, affection: 3 });
-      else if (caught.rarity === "rare") nudgeEgo(user, { fear: 3 });
-      else nudgeEgo(user, { fear: -1 });
+      if (caught.rarity !== "common") awardAchievement(user, "fish_master");
       saveUser();
       await send(ch, [`🎣 **${msg.author.username}** caught a **${caught.rarity}** fish: **${caught.name}**!`, `💰 Value: **${caught.price.toLocaleString()} sincoins**`, `⏳ Cooldown: **20s**`, `📦 Use \`${PREFIX}inventory\` to view your fish and items.`].join("\n"), token);
       break;
     }
 
+    case "inventory": {
+      if (!text) {
+        const lines = ["**Your Inventory**", ""];
+        if (user.fishInventory && Object.keys(user.fishInventory).length > 0) {
+          lines.push("**Fish:**");
+          for (const [name, count] of Object.entries(user.fishInventory)) {
+            const fish = FISH_ITEMS.find((f) => f.name === name);
+            lines.push(`  • **${name}** (${count}x) — ${fish?.price.toLocaleString() ?? "?"} sincoins each`);
+          }
+        }
+        if (user.itemInventory && Object.keys(user.itemInventory).length > 0) {
+          lines.push("", "**Collectible Items:**");
+          for (const [name, count] of Object.entries(user.itemInventory)) {
+            const item = COLLECTIBLE_ITEMS.find((i) => i.name === name);
+            lines.push(`  • **${name}** (${count}x) — ${item?.price.toLocaleString() ?? "?"} sincoins each`);
+          }
+        }
+        if (!user.fishInventory || !user.itemInventory || (Object.keys(user.fishInventory).length === 0 && Object.keys(user.itemInventory).length === 0)) {
+          lines.push("Your inventory is empty.");
+        }
+        await send(ch, lines.join("\n"), token);
+      }
+      break;
+    }
+
     case "sell": {
       if (!text) { await send(ch, `Usage: \`${PREFIX}sell <fish or item name>\``, token); break; }
-      const fishKey = findInventoryKey(user.fishInventory, text);
-      const itemKey = fishKey ? null : findInventoryKey(user.itemInventory, text);
+      const fishKey = findInventoryKey(user.fishInventory || {}, text);
+      const itemKey = findInventoryKey(user.itemInventory || {}, text);
       if (!fishKey && !itemKey) { await send(ch, `❌ You do not have any fish or items named **${text}**. Use \`${PREFIX}inventory\` to see your collection.`, token); break; }
       if (fishKey) {
-        const caught = FISH_ITEMS.find((fish) => fish.name === fishKey);
-        const amount = caught?.price ?? 0;
-        user.fishInventory[fishKey] -= 1;
-        if (user.fishInventory[fishKey] <= 0) delete user.fishInventory[fishKey];
-        user.balance += amount;
-        user.totalFishSold += 1;
+        const fish = FISH_ITEMS.find((f) => f.name === fishKey);
+        const price = fish.price;
+        user.balance += price;
+        user.fishInventory[fishKey]--;
+        if (user.fishInventory[fishKey] === 0) delete user.fishInventory[fishKey];
+        user.totalFishSold = (user.totalFishSold ?? 0) + 1;
         awardAchievement(user, "first_sell");
         saveUser();
-        await send(ch, [`💸 Sold **1x ${fishKey}** for **${amount.toLocaleString()} sincoins**.`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
-        break;
-      }
-      if (itemKey) {
-        const itemInfo = COLLECTIBLE_ITEMS.find((item) => item.name === itemKey);
-        const amount = itemInfo?.price ?? 0;
-        user.itemInventory[itemKey] -= 1;
-        if (user.itemInventory[itemKey] <= 0) delete user.itemInventory[itemKey];
-        user.balance += amount;
-        user.totalItemsSold += 1;
+        await send(ch, `✅ Sold **${fishKey}** for **${price.toLocaleString()} sincoins**.\n💰 New balance: **${user.balance.toLocaleString()} sincoins**`, token);
+      } else if (itemKey) {
+        const item = COLLECTIBLE_ITEMS.find((i) => i.name === itemKey);
+        const price = item.price;
+        user.balance += price;
+        user.itemInventory[itemKey]--;
+        if (user.itemInventory[itemKey] === 0) delete user.itemInventory[itemKey];
+        user.totalItemsSold = (user.totalItemsSold ?? 0) + 1;
         awardAchievement(user, "first_sell");
         saveUser();
-        await send(ch, [`💸 Sold **1x ${itemKey}** for **${amount.toLocaleString()} sincoins**.`, `💰 New balance: **${user.balance.toLocaleString()} sincoins**`].join("\n"), token);
-        break;
+        await send(ch, `✅ Sold **${itemKey}** for **${price.toLocaleString()} sincoins**.\n💰 New balance: **${user.balance.toLocaleString()} sincoins**`, token);
       }
       break;
     }
 
-    case "inventory":
-    case "inv": {
-      const fishLines = Object.entries(user.fishInventory).map(([name, count]) => {
-        const fishInfo = FISH_ITEMS.find((fish) => fish.name === name);
-        return `• **${name}** x${count} (${fishInfo?.rarity ?? "unknown"}, ${fishInfo?.price?.toLocaleString() ?? "0"} sincoins each)`;
-      });
-      const itemLines = Object.entries(user.itemInventory).map(([name, count]) => {
-        const itemInfo = COLLECTIBLE_ITEMS.find((item) => item.name === name);
-        return `• **${name}** x${count} (${itemInfo?.rarity ?? "unknown"}, ${itemInfo?.price?.toLocaleString() ?? "0"} sincoins each)`;
-      });
+    case "achievements":
+      await send(ch, ["**Your Achievements**", "", ...getAchievementStatus(user)].join("\n"), token);
+      break;
+
+    case "stats": {
+      const targetUser = targetId ? getUser(eco, targetId) : user;
+      const targetName = targetId ? (msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`) : msg.author.username;
       const lines = [
-        `📦 **${msg.author.username}**'s Inventory`,
+        `**${targetName}'s Stats**`,
         "",
-        `**Fish** (${fishLines.length} types)`,
-        fishLines.length ? fishLines.join("\n") : "• No fish caught yet.",
-        "",
-        `**Collectibles** (${itemLines.length} types)`,
-        itemLines.length ? itemLines.join("\n") : "• No anime items yet.",
-        "",
-        `💰 Balance: **${user.balance.toLocaleString()} sincoins**`,
-      ];
-      await send(ch, lines.join("\n"), token);
-      break;
-    }
-
-    case "follow": {
-      const mentioned = getMentionedUser(msg, args);
-      if (!mentioned) { await send(ch, `Usage: \`${PREFIX}follow @user\``, token); break; }
-      const followTargetId = mentioned.id;
-      const followTargetName = mentioned.username;
-      if (followTargetId === msg.author.id) { await send(ch, "You cannot follow yourself.", token); break; }
-      const targetUser = getUser(eco, followTargetId);
-      const alreadyFollowing = user.following.includes(followTargetId);
-      if (alreadyFollowing) {
-        user.following = user.following.filter((id) => id !== followTargetId);
-        targetUser.followers = targetUser.followers.filter((id) => id !== msg.author.id);
-        saveUser();
-        await send(ch, `👋 You unfollowed **${followTargetName}**.`, token);
-      } else {
-        user.following.push(followTargetId);
-        targetUser.followers.push(msg.author.id);
-        awardAchievement(user, "follow_friend");
-        saveUser();
-        saveEconomy(eco);
-        await send(ch, `✅ You are now following **${followTargetName}**!`, token);
-      }
-      break;
-    }
-
-    case "followers": {
-      const target = targetId ? getUser(eco, targetId) : user;
-      const count = target.followers?.length ?? 0;
-      await send(ch, `👥 **${targetId ? `<@${targetId}>` : msg.author.username}** has **${count} follower(s)**.`, token);
-      if (targetId) saveEconomy(eco);
-      break;
-    }
-
-    case "achievements": {
-      const lines = [
-        `🏆 **${msg.author.username}**'s Achievements`,
-        "",
-        ...getAchievementStatus(user),
-      ];
-      await send(ch, lines.join("\n"), token);
-      break;
-    }
-
-    case "stats":
-    case "fishstats": {
-      const mentioned = getMentionedUser(msg, args);
-      let statsTargetUser = user;
-      let statsTargetId = msg.author.id;
-      let statsTargetName = msg.author.username;
-
-      if (mentioned) {
-        statsTargetId = mentioned.id;
-        statsTargetName = mentioned.username;
-        statsTargetUser = getUser(eco, statsTargetId);
-      }
-
-      const fishCount = Object.values(statsTargetUser.fishInventory).reduce((sum, qty) => sum + qty, 0);
-      const itemCount = Object.values(statsTargetUser.itemInventory).reduce((sum, qty) => sum + qty, 0);
-      const joinedDate = new Date(statsTargetUser.joinedAt).toLocaleDateString();
-      const statusLabel = statsTargetUser.blacklisted ? "🚫 Blacklisted" : statsTargetUser.whitelisted ? "✅ Whitelisted" : "⚪ Normal User";
-
-      const lines = [
-        `📊 **${statsTargetName}**'s Stats`,
-        `🆔 User ID: \`${statsTargetId}\``,
-        `📅 Joined: **${joinedDate}**`,
-        `${statusLabel}`,
-        "",
-        `💰 Balance: **${statsTargetUser.balance.toLocaleString()} sincoins**`,
-        `🎣 Total fish caught: **${statsTargetUser.totalFishCaught}**`,
-        `⭐ Rare or better catches: **${statsTargetUser.totalRareCaught}**`,
-        `🐟 Total fish in inventory: **${fishCount}**`,
-        `🎁 Lootboxes opened: **${statsTargetUser.totalLootboxesOpened}**`,
-        `🧸 Collectibles owned: **${Object.keys(statsTargetUser.itemInventory).length}** types (${itemCount} total)`,
-        `👥 Following: **${statsTargetUser.following.length}** | Followers: **${statsTargetUser.followers.length}**`,
-        `🏅 Achievements earned: **${statsTargetUser.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
+        `💰 Balance: **${targetUser.balance.toLocaleString()} sincoins**`,
+        `🎣 Fish Caught: **${targetUser.totalFishCaught ?? 0}**`,
+        `🎁 Rare Fish: **${targetUser.totalRareCaught ?? 0}**`,
+        `📦 Lootboxes Opened: **${targetUser.totalLootboxesOpened ?? 0}**`,
+        `🏆 Achievements: **${targetUser.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
       ];
       await send(ch, lines.join("\n"), token);
       break;
     }
 
     case "leaderboard": {
-      const sorted = Object.entries(eco)
-        .map(([id, profile]) => ({ id, balance: profile.balance ?? 0 }))
-        .sort((a, b) => b.balance - a.balance)
-        .slice(0, 10);
-      const lines = [
-        "🏆 **Sincoin Leaderboard**",
-        "",
-        ...sorted.map((entry, index) => `**${index + 1}.** <@${entry.id}> — **${entry.balance.toLocaleString()} sincoins**`),
-      ];
+      const sorted = Object.entries(eco).sort((a, b) => b[1].balance - a[1].balance).slice(0, 10);
+      const lines = ["**Top 10 Sincoin Holders**", ""];
+      for (let i = 0; i < sorted.length; i++) {
+        const [userId, userData] = sorted[i];
+        lines.push(`${i + 1}. <@${userId}> — **${userData.balance.toLocaleString()} sincoins**`);
+      }
       await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "follow": {
+      if (!targetId) { await send(ch, `Usage: \`${PREFIX}follow @user\``, token); break; }
+      const targetUser = getUser(eco, targetId);
+      if (!user.following) user.following = [];
+      if (!targetUser.followers) targetUser.followers = [];
+      if (user.following.includes(targetId)) {
+        await send(ch, `❌ You're already following <@${targetId}>.`, token);
+        break;
+      }
+      user.following.push(targetId);
+      targetUser.followers.push(msg.author.id);
+      awardAchievement(user, "follow_friend");
+      saveUser();
+      saveEconomy(eco);
+      await send(ch, `✅ You're now following <@${targetId}>!`, token);
       break;
     }
 
     case "work": {
       const now = Date.now();
-      if (now < (user.workCooldown || 0) + WORK_COOLDOWN_MS) {
-        const wait = (user.workCooldown + WORK_COOLDOWN_MS) - now;
+      const wait = user.workCooldown - now;
+      if (wait > 0) {
         const hours = Math.floor(wait / (60 * 60 * 1000));
-        const mins = Math.floor((wait % (60 * 60 * 1000)) / (60 * 1000));
-        await send(ch, `⏳ You already worked recently. Come back in **${hours}h ${mins}m**.`, token);
+        const minutes = Math.floor((wait % (60 * 60 * 1000)) / (60 * 1000));
+        await send(ch, `⏳ You need to wait **${hours}h ${minutes}m** before working again.`, token);
         break;
       }
+      user.workCooldown = now + WORK_COOLDOWN_MS;
       const job = WORK_JOBS[Math.floor(Math.random() * WORK_JOBS.length)];
       const pay = Math.floor(Math.random() * (job.maxPay - job.minPay + 1)) + job.minPay;
       user.balance += pay;
-      user.workCooldown = now;
-      nudgeEgo(user, { trust: 4, affection: 2 });
       saveUser();
-      await send(ch, [
-        `💼 **${msg.author.username}** worked as a **${job.name}**!`,
-        `> ${job.description}`,
-        `💰 Earned: **${pay.toLocaleString()} sincoins** | Balance: **${user.balance.toLocaleString()} sincoins**`,
-        `⏳ You can work again in **12 hours**.`,
-      ].join("\n"), token);
-      break;
-    }
-
-    case "warn": {
-      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ Only moderators can warn users.", token); break; }
-      const warnTarget = getMentionedUser(msg, args);
-      if (!warnTarget) { await send(ch, `Usage: \`${PREFIX}warn @user <reason>\``, token); break; }
-      const warnReason = args.slice(args.findIndex((a) => parseMention(a.trim())) !== -1 ? args.findIndex((a) => parseMention(a.trim())) + 1 : 1).join(" ").trim();
-      if (!warnReason) { await send(ch, `❌ Please provide a reason. Usage: \`${PREFIX}warn @user <reason>\``, token); break; }
-      const warnedUser = getUser(eco, warnTarget.id);
-      if (!warnedUser.warnings) warnedUser.warnings = [];
-      warnedUser.warnings.push({ reason: warnReason, by: msg.author.id, byName: msg.author.username, timestamp: Date.now() });
-      nudgeEgo(warnedUser, { trust: -15, rivalry: 10, affection: -8 });
-      saveEconomy(eco);
-      await send(ch, [
-        `⚠️ **${warnTarget.username}** has been warned.`,
-        `📝 Reason: **${warnReason}**`,
-        `📊 Total warnings: **${warnedUser.warnings.length}**`,
-      ].join("\n"), token);
-      break;
-    }
-
-    case "warncheck": {
-      const warnCheckTarget = getMentionedUser(msg, args);
-      if (!warnCheckTarget) { await send(ch, `Usage: \`${PREFIX}warncheck @user\``, token); break; }
-      const warnCheckUser = getUser(eco, warnCheckTarget.id);
-      const warns = warnCheckUser.warnings || [];
-      if (warns.length === 0) {
-        await send(ch, `✅ **${warnCheckTarget.username}** has no warnings.`, token);
-        break;
-      }
-      const warnLines = warns.map((w, i) => {
-        const date = new Date(w.timestamp).toLocaleString();
-        return `**${i + 1}.** ${w.reason}\n   › by **${w.byName ?? `<@${w.by}>`}** on ${date}`;
-      });
-      await send(ch, [`⚠️ **${warnCheckTarget.username}**'s Warnings (${warns.length} total)`, "", ...warnLines].join("\n"), token);
-      break;
-    }
-
-    case "kick": {
-      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ Only moderators can kick users.", token); break; }
-      if (!targetId) { await send(ch, `Usage: \`${PREFIX}kick @user [reason]\``, token); break; }
-      if (!msg.guild_id) { await send(ch, "❌ This command can only be used in a server.", token); break; }
-      const kickReason = args.slice(1).join(" ").trim() || "No reason provided";
-      const kickName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
-      try {
-        await apiRequest("DELETE", `/guilds/${msg.guild_id}/members/${targetId}`, undefined, token);
-        await send(ch, [`👢 **${kickName}** has been kicked from the server.`, `📝 Reason: **${kickReason}**`].join("\n"), token);
-      } catch (err) {
-        await send(ch, `❌ Failed to kick: ${err.message}`, token);
-      }
-      break;
-    }
-
-    case "ban": {
-      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ Only moderators can ban users.", token); break; }
-      if (!targetId) { await send(ch, `Usage: \`${PREFIX}ban @user [reason]\``, token); break; }
-      if (!msg.guild_id) { await send(ch, "❌ This command can only be used in a server.", token); break; }
-      const banReason = args.slice(1).join(" ").trim() || "No reason provided";
-      const banName = msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`;
-      try {
-        await apiRequest("PUT", `/guilds/${msg.guild_id}/bans/${targetId}`, { reason: banReason }, token);
-        await send(ch, [`🔨 **${banName}** has been banned from the server.`, `📝 Reason: **${banReason}**`].join("\n"), token);
-      } catch (err) {
-        await send(ch, `❌ Failed to ban: ${err.message}`, token);
-      }
-      break;
-    }
-
-    case "poll": {
-      const rawPoll = args.join(" ");
-      const pollOptions = rawPoll.split("|").map((s) => s.trim()).filter(Boolean);
-      if (pollOptions.length < 2) {
-        await send(ch, `Usage: \`${PREFIX}poll Yes | No\` (separate options with \`|\`)`, token);
-        break;
-      }
-      const numberEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-      const optionLines = pollOptions.slice(0, 10).map((opt, i) => `${numberEmojis[i]} ${opt}`);
-      await send(ch, [`📊 **Poll by ${msg.author.username}**`, "", ...optionLines, "", "*React to vote!*"].join("\n"), token);
-      break;
-    }
-
-    case "dev": {
-      if (!isDevUser(msg.author.id, eco)) { await send(ch, "❌ This command is for owners and whitelisted moderators only.", token); break; }
-      const sub = args[0]?.toLowerCase();
-      if (!sub) {
-        await send(ch, [
-          "🛠️ **Dev Menu**",
-          "",
-          `\`${PREFIX}dev resetcoins @user\` — Reset a user's coins to 0`,
-          `\`${PREFIX}dev givecoins @user <amount>\` — Give coins to a user`,
-          `\`${PREFIX}dev blacklist add|remove @user\` — Block or allow a user from using commands`,
-          `\`${PREFIX}dev whitelist add|remove @user\` — Whitelist a user for dev menu access`,
-        ].join("\n"), token);
-        break;
-      }
-      switch (sub) {
-        case "resetcoins": {
-          if (!targetId) { await send(ch, `Usage: \`${PREFIX}dev resetcoins @user\``, token); break; }
-          const target = getUser(eco, targetId);
-          target.balance = 0;
-          saveEconomy(eco);
-          await send(ch, `✅ Reset coins for <@${targetId}>.`, token);
-          break;
-        }
-        case "givecoins": {
-          if (!targetId || !args[1]) { await send(ch, `Usage: \`${PREFIX}dev givecoins @user <amount>\``, token); break; }
-          const amount = Number(args[1]) || Number(args[2]);
-          if (isNaN(amount) || amount <= 0) { await send(ch, "❌ Enter a valid positive amount.", token); break; }
-          const target = getUser(eco, targetId);
-          target.balance += amount;
-          saveEconomy(eco);
-          await send(ch, `✅ Gave **${amount.toLocaleString()}** sincoins to <@${targetId}>.`, token);
-          break;
-        }
-        case "blacklist": {
-          const action = args[1]?.toLowerCase();
-          if (!["add", "remove"].includes(action) || !targetId) { await send(ch, `Usage: \`${PREFIX}dev blacklist add|remove @user\``, token); break; }
-          const target = getUser(eco, targetId);
-          target.blacklisted = action === "add";
-          if (action === "add") nudgeEgo(target, { affection: -20, rivalry: 15, trust: -20 });
-          else nudgeEgo(target, { affection: 10, rivalry: -5 });
-          saveEconomy(eco);
-          await send(ch, `✅ ${action === "add" ? "Added" : "Removed"} <@${targetId}> ${action === "add" ? "to" : "from"} the command blacklist.`, token);
-          break;
-        }
-        case "whitelist": {
-          const action = args[1]?.toLowerCase();
-          if (!["add", "remove"].includes(action) || !targetId) { await send(ch, `Usage: \`${PREFIX}dev whitelist add|remove @user\``, token); break; }
-          const target = getUser(eco, targetId);
-          target.whitelisted = action === "add";
-          saveEconomy(eco);
-          await send(ch, `✅ ${action === "add" ? "Whitelisted" : "Removed whitelist from"} <@${targetId}> for dev menu access.`, token);
-          break;
-        }
-        default:
-          await send(ch, `❌ Unknown dev command. Use \`${PREFIX}dev\` to see available dev commands.`, token);
-          break;
-      }
-      break;
-    }
-
-    case "owner": {
-      if (!isOwner(msg.author.id)) { await send(ch, "This command is owner only.", token); break; }
-      await send(ch, "Hello, owner! You have access to this command.", token);
+      await send(ch, [`💼 **${job.name}**`, `> ${job.description}`, `💰 Earned: **${pay.toLocaleString()} sincoins**`].join("\n"), token);
       break;
     }
 
     case "opinion": {
-      const opTarget = getMentionedUser(msg, args);
-      let opUserId, opUsername, opUser;
-      if (opTarget) {
-        opUserId = opTarget.id;
-        opUsername = opTarget.username;
-        opUser = getUser(eco, opUserId);
-      } else {
-        opUserId = msg.author.id;
-        opUsername = msg.author.username;
-        opUser = user;
-      }
-      const ego = getEgo(opUser);
-      const flavor = egoFlavorLine(opUsername, ego);
-      const lines = [
-        `🧠 **Sinbot's Opinion of ${opUsername}**`,
-        "",
-        `🤝 Trust: **${trustLabel(ego.trust)}** • ${ego.trust}/100`,
-        `😰 Fear: **${fearLabel(ego.fear)}** • ${ego.fear}/100`,
-        `💛 Affection: **${affectionLabel(ego.affection)}** • ${ego.affection}/100`,
-        `⚔️ Rivalry: **${rivalryLabel(ego.rivalry)}** • ${ego.rivalry}/100`,
-        `🔢 Interactions tracked: **${ego.interactions || 0}**`,
-        "",
-        `*"${flavor}"*`,
+      const targetUser = targetId ? getUser(eco, targetId) : user;
+      const targetName = targetId ? (msg.mentions.find((m) => m.id === targetId)?.username ?? `<@${targetId}>`) : msg.author.username;
+      const ego = getEgo(targetUser);
+      const line = egoFlavorLine(targetName, ego);
+      const stats = [
+        `**Trust:** ${trustLabel(ego.trust)} (${ego.trust}/100)`,
+        `**Fear:** ${fearLabel(ego.fear)} (${ego.fear}/100)`,
+        `**Affection:** ${affectionLabel(ego.affection)} (${ego.affection}/100)`,
+        `**Rivalry:** ${rivalryLabel(ego.rivalry)} (${ego.rivalry}/100)`,
       ];
-      await send(ch, lines.join("\n"), token);
+      await send(ch, [`**My Opinion of ${targetName}**`, "", line, "", ...stats].join("\n"), token);
       break;
     }
 
     case "myopinion": {
       const ego = getEgo(user);
-      const flavor = egoFlavorLine(msg.author.username, ego);
+      const line = passiveEgoComment(msg.author.username, ego);
+      if (!line) {
+        await send(ch, `I don't have a strong opinion of you yet, **${msg.author.username}**.`, token);
+      } else {
+        await send(ch, line, token);
+      }
+      break;
+    }
+
+    case "dev": {
+      if (!isDevUser(msg.author.id, eco)) {
+        await send(ch, "❌ You don't have permission to use this command.", token);
+        break;
+      }
       const lines = [
-        `🧠 **What I think of you, ${msg.author.username}**`,
+        "**Developer Menu**",
         "",
-        `🤝 Trust: **${trustLabel(ego.trust)}** • ${ego.trust}/100`,
-        `😰 Fear: **${fearLabel(ego.fear)}** • ${ego.fear}/100`,
-        `💛 Affection: **${affectionLabel(ego.affection)}** • ${ego.affection}/100`,
-        `⚔️ Rivalry: **${rivalryLabel(ego.rivalry)}** • ${ego.rivalry}/100`,
-        `🔢 Interactions tracked: **${ego.interactions || 0}**`,
-        "",
-        `*"${flavor}"*`,
+        `\`${PREFIX}dev whitelist @user\` — Whitelist a user`,
+        `\`${PREFIX}dev blacklist @user\` — Blacklist a user`,
+        `\`${PREFIX}dev give @user <amount>\` — Give sincoins`,
+        `\`${PREFIX}dev reset @user\` — Reset a user's data`,
       ];
-      await send(ch, lines.join("\n"), token);
+      if (args[0] === "whitelist") {
+        const targetUser = getUser(eco, targetId);
+        targetUser.whitelisted = true;
+        saveEconomy(eco);
+        await send(ch, `✅ Whitelisted <@${targetId}>.`, token);
+      } else if (args[0] === "blacklist") {
+        const targetUser = getUser(eco, targetId);
+        targetUser.blacklisted = true;
+        saveEconomy(eco);
+        await send(ch, `✅ Blacklisted <@${targetId}>.`, token);
+      } else if (args[0] === "give") {
+        const amount = parseInt(args[2]);
+        if (isNaN(amount)) { await send(ch, `Usage: \`${PREFIX}dev give @user <amount>\``, token); break; }
+        const targetUser = getUser(eco, targetId);
+        targetUser.balance += amount;
+        saveEconomy(eco);
+        await send(ch, `✅ Gave **${amount.toLocaleString()} sincoins** to <@${targetId}>.`, token);
+      } else if (args[0] === "reset") {
+        delete eco[targetId];
+        saveEconomy(eco);
+        await send(ch, `✅ Reset <@${targetId}>'s data.`, token);
+      } else {
+        await send(ch, lines.join("\n"), token);
+      }
       break;
     }
 
     default:
-      await send(ch, `❓ Unknown command. Use \`${PREFIX}help\` for the command list.`, token);
-  }
-
-  // ─── Ego: track interaction & maybe drop a passive comment ─────────────────
-  if (msg.author.id !== BOT_USER_ID) {
-    const ego = getEgo(user);
-    ego.interactions = (ego.interactions || 0) + 1;
-    // slow drift toward baseline over time
-    if (Math.random() < 0.05) {
-      nudgeEgo(user, {
-        trust: ego.trust < 50 ? 1 : (ego.trust > 50 ? -1 : 0),
-        affection: ego.affection < 50 ? 1 : (ego.affection > 50 ? -1 : 0),
-        fear: ego.fear > 0 ? -1 : 0,
-        rivalry: ego.rivalry > 0 ? -1 : 0,
-      });
-    }
-    // high balance makes the bot nervous
-    if (user.balance > 10000) nudgeEgo(user, { fear: 1 });
-    // passive personality remark (12% chance)
-    if (Math.random() < 0.12) {
-      const comment = passiveEgoComment(msg.author.username, ego);
-      if (comment) {
-        try { await send(ch, comment, token); } catch {}
-      }
-    }
-    saveEconomy(eco);
+      await send(ch, `❌ Unknown command. Use \`${PREFIX}help\` for a list of commands.`, token);
   }
 }
 
-// ─── Bot ──────────────────────────────────────────────────────────────────────
+// ─── Bot startup ──────────────────────────────────────────────────────────────
 async function startBot(token, selfId) {
   let heartbeatInterval = null;
   let statusInterval = null;
@@ -1253,7 +1019,7 @@ async function startBot(token, selfId) {
           }
           if (t === "MESSAGE_CREATE") {
             const msg = d;
-            if (seenMessageIds.has(msg.id)) break;
+            if (seenMessageIds.has(msg.id)) return;
             seenMessageIds.add(msg.id);
             setTimeout(() => seenMessageIds.delete(msg.id), 15000);
             const content = (msg.content ?? "").trim();
@@ -1318,3 +1084,4 @@ async function main() {
 }
 
 main().catch((err) => { console.error("Fatal:", err); process.exit(1); });
+
