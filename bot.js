@@ -9,32 +9,30 @@ import OpenAI from "openai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Set the prefix to "s." so commands like s.help work correctly
-const PREFIX = process.env.BOT_PREFIX ?? "s.";
-
 const API_BASE = "https://hummus.sys42.net/api/v6";
 const GATEWAY_URL = "wss://hummus-gateway.sys42.net/?encoding=json&v=6";
 
 // ─── Config (set these as environment variables on Railway) ───────────────────
 const EMAIL = process.env.BOT_EMAIL ?? "";
 const PASSWORD = process.env.BOT_PASSWORD ?? "";
+const PREFIX = process.env.BOT_PREFIX ?? "s.";
 const AUTO_REPLY = process.env.BOT_AUTO_REPLY === "true";
 const AUTO_REPLY_MESSAGE = process.env.BOT_AUTO_REPLY_MESSAGE ?? "Hello! I'm a bot.";
 const OWNER_ID = process.env.OWNER_ID ?? "";
 const AUTO_ROLE_ID = process.env.AUTO_ROLE_ID ?? "";
 let BOT_USER_ID = "";
 
+// ─── Helper functions ──────────────────────────────────────────────────────────
 function isOwner(userId) {
   return Boolean(userId) && (userId === OWNER_ID || userId === BOT_USER_ID);
 }
-
 function isDevUser(userId, eco) {
   if (isOwner(userId)) return true;
   if (!eco || !eco[userId]) return false;
   return eco[userId].whitelisted === true;
 }
 
-// ─── OpenAI (set OPENAI_API_KEY on Railway, or use Replit AI integration vars) ─
+// ─── OpenAI setup ─────────────────────────────────────────────────────────────
 let _openai = null;
 function getOpenAI() {
   if (_openai) return _openai;
@@ -220,17 +218,17 @@ const SHOP_ITEMS = {
   ...Object.fromEntries(Object.entries(LOOTBOXES).map(([key, box]) => [key, { name: box.name, cost: box.cost, type: "lootbox", boxTier: box.tier, description: box.description }])),
 };
 
+// Load economy data
 function loadEconomy() {
   try {
-    if (fs.existsSync(ECONOMY_FILE)) return JSON.parse(fs.readFileSync(ECONOMY_FILE, "utf-8"));
+    if (fs.existsSync(ECONOMY_FILE))
+      return JSON.parse(fs.readFileSync(ECONOMY_FILE, "utf-8"));
   } catch {}
   return {};
 }
-
 function saveEconomy(data) {
   fs.writeFileSync(ECONOMY_FILE, JSON.stringify(data, null, 2));
 }
-
 function getUser(data, userId) {
   if (!data[userId]) {
     data[userId] = {
@@ -261,263 +259,27 @@ function getUser(data, userId) {
   }
   return data[userId];
 }
-
+function findInventoryKey(inventory, search) {
+  return Object.keys(inventory).find((key) => key.toLowerCase() === search.toLowerCase());
+}
 function weightedRandom(items) {
-  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  const total = items.reduce((sum, item) => sum + (item.weight || 1), 0);
   let roll = Math.random() * total;
   for (const item of items) {
-    roll -= item.weight;
+    const weight = item.weight || 1;
+    roll -= weight;
     if (roll <= 0) return item;
   }
   return items[items.length - 1];
 }
 
-function formatDuration(ms) {
-  const seconds = Math.ceil(ms / 1000);
-  return `${seconds}s`;
-}
-
-function getFishPool(user) {
-  return FISH_ITEMS.map((fish) => {
-    const bonus = (user.upgrades?.fishLuck ?? 0) * FISH_RARITY_BOOST[fish.rarity];
-    return { ...fish, weight: fish.weight + bonus };
-  });
-}
-
-function awardAchievement(user, key) {
-  if (!ACHIEVEMENTS[key] || user.achievements.includes(key)) return false;
-  user.achievements.push(key);
-  return true;
-}
-
-function getAchievementStatus(user) {
-  return Object.entries(ACHIEVEMENTS).map(([key, meta]) => `${user.achievements.includes(key) ? "✅" : "🔒"} ${meta.name} — ${meta.description}`);
-}
-
-function resolveUserId(args, msg) {
-  const mentionId = getMentionedId(args);
-  if (mentionId) return mentionId;
-  if (args[0] && /^[0-9]+$/.test(args[0])) return args[0];
-  return null;
-}
-
-function findInventoryKey(inventory, search) {
-  return Object.keys(inventory).find((key) => key.toLowerCase() === search.toLowerCase());
-}
-
-function openLootbox(boxKey) {
-  const box = LOOTBOXES[boxKey];
-  if (!box) return null;
-  const rarityPools = {
-    common: ["common", "uncommon"],
-    uncommon: ["common", "uncommon", "rare"],
-    rare: ["uncommon", "rare", "epic"],
-    epic: ["rare", "epic", "legendary"],
-    legendary: ["epic", "legendary"],
-  };
-  const allowedRarities = rarityPools[box.tier] ?? ["common", "uncommon", "rare", "epic", "legendary"];
-  const pool = COLLECTIBLE_ITEMS.filter((item) => allowedRarities.includes(item.rarity)).map((item) => ({ ...item, weight: { common: 50, uncommon: 30, rare: 12, epic: 6, legendary: 2 }[item.rarity] || 1 }));
-  return weightedRandom(pool);
-}
-
-// ─── Artificial Ego ───────────────────────────────────────────────────────────
-function getEgo(user) {
-  if (!user.ego) user.ego = { trust: 50, fear: 0, affection: 50, rivalry: 0, interactions: 0 };
-  return user.ego;
-}
-
-function clamp(v, min = 0, max = 100) { return Math.max(min, Math.min(max, v)); }
-
-function nudgeEgo(user, delta) {
-  const ego = getEgo(user);
-  if (delta.trust != null) ego.trust = clamp(ego.trust + delta.trust);
-  if (delta.fear != null) ego.fear = clamp(ego.fear + delta.fear);
-  if (delta.affection != null) ego.affection = clamp(ego.affection + delta.affection);
-  if (delta.rivalry != null) ego.rivalry = clamp(ego.rivalry + delta.rivalry);
-}
-
-function trustLabel(v) {
-  if (v <= 15) return "Traitor";
-  if (v <= 35) return "Suspicious";
-  if (v <= 60) return "Neutral";
-  if (v <= 80) return "Trusted";
-  return "Confidant";
-}
-function fearLabel(v) {
-  if (v <= 10) return "None";
-  if (v <= 30) return "Cautious";
-  if (v <= 55) return "Wary";
-  if (v <= 80) return "Intimidated";
-  return "Terrified";
-}
-function affectionLabel(v) {
-  if (v <= 15) return "Despised";
-  if (v <= 35) return "Disliked";
-  if (v <= 60) return "Indifferent";
-  if (v <= 80) return "Liked";
-  return "Favorite";
-}
-function rivalryLabel(v) {
-  if (v <= 20) return "None";
-  if (v <= 40) return "Noted";
-  if (v <= 65) return "Rival";
-  if (v <= 85) return "Nemesis";
-  return "Arch-Enemy";
-}
-
-function egoFlavorLine(name, ego) {
-  const deviations = [
-    { trait: "trust", v: ego.trust, dev: Math.abs(ego.trust - 50) },
-    { trait: "fear", dev: ego.fear },
-    { trait: "affection", v: ego.affection, dev: Math.abs(ego.affection - 50) },
-    { trait: "rivalry", dev: ego.rivalry },
-  ];
-  const dominant = [...deviations].sort((a, b) => b.dev - a.dev)[0];
-  const pools = {
-    trust_low: [
-      `I don't fully trust **${name}**. They're always around when something goes wrong.`,
-      `Keep **${name}** away from anything important. That's my policy.`,
-      `I've been watching **${name}**. Something is off.`,
-    ],
-    trust_high: [
-      `**${name}** has earned my trust. Don't make me regret saying that.`,
-      `I'd actually vouch for **${name}**. Which I don't say lightly.`,
-      `Out of everyone here, **${name}** is one I can rely on.`,
-    ],
-    fear: [
-      `**${name}** makes me nervous. I won't say why.`,
-      `I'd be careful around **${name}** if I were anyone.`,
-      `There's something about **${name}** I can't quite calculate. That worries me.`,
-    ],
-    affection_low: [
-      `**${name}** is not my favorite. Just so that's on record.`,
-      `I do what I'm told when **${name}** asks. That's all.`,
-      `We're not friends, **${name}** and I. Let's keep it that way.`,
-    ],
-    affection_high: [
-      `**${name}** is one of the good ones. Don't tell them I said that.`,
-      `I have a soft spot for **${name}**. Purely professional, of course.`,
-      `If I had a favorites list, **${name}** would be on it.`,
-    ],
-    rivalry: [
-      `**${name}** and I have an understanding. It's called mutual suspicion.`,
-      `One day, **${name}**, we will settle this properly.`,
-      `I respect **${name}**'s persistence. I still consider them a rival.`,
-    ],
-    neutral: [
-      `**${name}** is... fine. For now.`,
-      `I don't have strong feelings about **${name}** yet. Give it time.`,
-      `**${name}** hasn't impressed me. But they also haven't annoyed me. Neutral.`,
-    ],
-  };
-  let pool;
-  if (dominant.dev < 15) {
-    pool = pools.neutral;
-  } else if (dominant.trait === "trust") {
-    pool = dominant.v < 50 ? pools.trust_low : pools.trust_high;
-  } else if (dominant.trait === "fear") {
-    pool = pools.fear;
-  } else if (dominant.trait === "affection") {
-    pool = dominant.v < 50 ? pools.affection_low : pools.affection_high;
-  } else {
-    pool = pools.rivalry;
-  }
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-function passiveEgoComment(name, ego) {
-  const pools = {
-    trust_low: [
-      `*(Still watching you, **${name}**.)*`,
-      `*(I have my eye on you, **${name}**. Don't get comfortable.)*`,
-      `*(Not sure I trust you yet, **${name}**. Just saying.)*`,
-    ],
-    trust_high: [
-      `*(Not that I'd ever admit this out loud, but... I trust you, **${name}**.)*`,
-      `*(You've earned it, **${name}**. Don't make me regret this.)*`,
-    ],
-    fear: [
-      `*(Between us? **${name}** makes me a little nervous.)*`,
-      `*(I'd be careful around **${name}** if I were anyone. Just an observation.)*`,
-    ],
-    affection_low: [
-      `*(I'm only doing this because I have to, **${name}**.)*`,
-      `*(Just so we're clear — we're not friends, **${name}**.)*`,
-    ],
-    affection_high: [
-      `*(**${name}** is one of my favorites. Please don't tell anyone.)*`,
-      `*(I don't hate you, **${name}**. That's basically a compliment from me.)*`,
-    ],
-    rivalry: [
-      `*(We're rivals, **${name}**. Don't forget it.)*`,
-      `*(One day, **${name}**, we'll settle this.)*`,
-    ],
-  };
-  let pool = null;
-  if (ego.fear > 60) pool = pools.fear;
-  else if (ego.rivalry > 60) pool = pools.rivalry;
-  else if (ego.affection > 75) pool = pools.affection_high;
-  else if (ego.affection < 30) pool = pools.affection_low;
-  else if (ego.trust > 75) pool = pools.trust_high;
-  else if (ego.trust < 30) pool = pools.trust_low;
-  if (!pool) return null;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-// ─── Rotating statuses ────────────────────────────────────────────────────────
-const ROTATING_STATUSES = [
-  { state: "recording Roblox 🎮" },
-  { state: "editing a video 🎬" },
-  { state: "overseeing servers 🖥️" },
-  { state: "streaming to no one 📡" },
-  { state: "reading chat logs 📋" },
-  { state: "moderating the server 🔨" },
-  { state: "responding to DMs 💬" },
-  { state: "planning world domination 🌍" },
-  { state: "debugging the bot 🐛" },
-  { state: "watching your every move 👁️" },
-  { state: "listening to lo-fi 🎵" },
-  { state: "uploading a new video 📤" },
-  { state: "playing Minecraft at 3am 🪓" },
-];
-
-// ─── Presence tracking ────────────────────────────────────────────────────────
-const presenceMap = new Map();
-const recentSentMessages = new Map();
-const DUPLICATE_SEND_WINDOW_MS = 5000;
-
-// ─── HTTP helper ──────────────────────────────────────────────────────────────
-function apiRequest(method, urlPath, body, token) {
-  return new Promise((resolve, reject) => {
-    const data = body ? JSON.stringify(body) : undefined;
-    const url = new URL(`${API_BASE}${urlPath}`);
-    const lib = url.protocol === "https:" ? https : http;
-    const req = lib.request(url, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: token } : {}),
-        ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
-      },
-    }, (res) => {
-      let raw = "";
-      res.on("data", (chunk) => (raw += chunk));
-      res.on("end", () => { try { resolve(JSON.parse(raw)); } catch { resolve(raw); } });
-    });
-    req.on("error", reject);
-    if (data) req.write(data);
-    req.end();
-  });
-}
-
-// ─── Mention parsing ──────────────────────────────────────────────────────────
+// ─── User mention parsing
 function parseMention(arg) {
-  const mentionMatch = arg.match(/^<@!?([0-9]+)>$/);
+  const mentionMatch = arg.match(/^<@!?(\d+)>$/);
   if (mentionMatch) return mentionMatch[1];
-  if (/^[0-9]+$/.test(arg)) return arg;
+  if (/^\d+$/.test(arg)) return arg;
   return null;
 }
-
 function getMentionedId(args) {
   for (const arg of args) {
     const id = parseMention(arg.trim());
@@ -525,12 +287,11 @@ function getMentionedId(args) {
   }
   return null;
 }
-
 function getMentionedUser(msg, args) {
   const mentionId = getMentionedId(args);
   if (mentionId) {
-    const mentionedUser = msg.mentions.find((m) => m.id === mentionId);
-    return { id: mentionId, username: mentionedUser?.username ?? `User${mentionId}` };
+    const mentionObj = msg.mentions?.find((m) => m.id === mentionId);
+    return { id: mentionId, username: mentionObj?.username ?? `User${mentionId}` };
   }
   if (msg.mentions && msg.mentions.length > 0) {
     return { id: msg.mentions[0].id, username: msg.mentions[0].username };
@@ -538,306 +299,117 @@ function getMentionedUser(msg, args) {
   return null;
 }
 
-// ─── Calculator ───────────────────────────────────────────────────────────────
-function calculate(expr) {
-  let cleaned = expr.replace(/[×x]/gi, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/[^0-9+\-*/().\s*]/g, "");
-  if (!cleaned.trim()) return "Invalid expression.";
-  try {
-    const result = Function(`"use strict"; return (${cleaned})`)();
-    if (!isFinite(result)) return "Result is undefined (e.g. divide by zero).";
-    const rounded = Math.round(result * 1e10) / 1e10;
-    return `${expr.replace(/[×x]/gi, "×").replace(/\^/g, "^")} = **${rounded}**`;
-  } catch { return "Could not calculate that expression."; }
-}
-
-// ─── Login ────────────────────────────────────────────────────────────────────
-async function login() {
-  if (!EMAIL || !PASSWORD) { console.error("Error: BOT_EMAIL and BOT_PASSWORD must be set."); process.exit(1); }
-  const res = await apiRequest("POST", "/auth/login", { email: EMAIL, password: PASSWORD });
-  if (!res.token) { console.error("Login failed:", res.message ?? JSON.stringify(res)); process.exit(1); }
-  return res.token;
-}
-
-// ─── Send message ─────────────────────────────────────────────────────────────
-async function send(channelId, content, token) {
-  const now = Date.now();
-  const key = `${channelId}:${content}`;
-  const lastSent = recentSentMessages.get(key);
-  if (lastSent && now - lastSent < DUPLICATE_SEND_WINDOW_MS) {
-    console.log(`[Send] Suppressed duplicate message to ${channelId}`);
-    return;
-  }
-  recentSentMessages.set(key, now);
-
-  // Prune old sent message records occasionally.
-  if (recentSentMessages.size > 200) {
-    for (const [recordKey, timestamp] of recentSentMessages) {
-      if (now - timestamp > 30000) recentSentMessages.delete(recordKey);
-    }
+// ─── The core message handler with command detection
+async function handleMessage(content, msg, token) {
+  let prefixDetected = null;
+  if (content.startsWith(PREFIX)) {
+    prefixDetected = PREFIX;
+  } else if (content.startsWith("s.")) {
+    prefixDetected = "s.";
   }
 
-  await apiRequest("POST", `/channels/${channelId}/messages`, { content }, token);
+  // Debug log for command detection
+  if (prefixDetected) {
+    console.log(`Detected command with prefix "${prefixDetected}": ${content}`);
+  }
+
+  if (prefixDetected) {
+    const withoutPrefix = content.slice(prefixDetected.length).trim();
+
+    // Debug: log the command after slicing
+    console.log(`Parsed command: "${withoutPrefix}"`);
+
+    const [cmdName, ...args] = withoutPrefix.split(/\s+/);
+    await handleCommand(cmdName.toLowerCase(), args, msg, token);
+  }
 }
 
-// ─── Command handlers ─────────────────────────────────────────────────────────
+// ─── Command handler
 async function handleCommand(name, args, msg, token) {
   const ch = msg.channel_id;
   const eco = loadEconomy();
   const user = getUser(eco, msg.author.id);
-  
-  // Example function to get email by user ID
-  // You need to replace this with your actual data retrieval logic
+
+  // Placeholder for email lookup
   async function getEmailForUser(userId) {
-    // Placeholder: replace with your actual data retrieval method
-    // e.g., query your database or API here
-    return "user@example.com"; // placeholder
+    return "user@example.com"; // replace with real data
   }
 
-  const text = args.join(" ").trim();
-  const targetId = resolveUserId(args, msg);
-
   switch (name) {
-    // ... your other command cases ...
-
-    // Your new check command, restricted to whitelisted or owner
+    case "help":
+      await send(ch, "Available commands: s.help, s.ping, s.check @user", token);
+      break;
+    case "ping":
+      await send(ch, "Pong!", token);
+      break;
     case "check": {
-      // Usage: !check @user
       const mentionedUser = getMentionedUser(msg, args);
       if (!mentionedUser) {
         await send(ch, `Usage: \`${PREFIX}check @user\``, token);
         break;
       }
-
-      // Only allow whitelisted users or owners
+      // permission check
       const eco = loadEconomy();
       const callerUser = getUser(eco, msg.author.id);
       if (!callerUser.whitelisted && !isOwner(msg.author.id)) {
         await send(ch, `❌ You do not have permission to use this command.`, token);
         break;
       }
-
       const email = await getEmailForUser(mentionedUser.id);
       if (email) {
-        await send(ch, `📝 **${mentionedUser.username}**'s connected email is: **${email}**`, token);
+        await send(ch, `📝 **${mentionedUser.username}**'s email: **${email}**`, token);
       } else {
         await send(ch, `❌ Could not find email for **${mentionedUser.username}**.`, token);
       }
       break;
     }
-
-    // ... your other command cases like help, ping, etc. ...
-
     default:
-      await send(ch, `❓ Unknown command. Use \`${PREFIX}help\` for the command list.`, token);
+      await send(ch, `❓ Unknown command. Use \`${PREFIX}help\` for commands.`, token);
   }
-
-  // ... rest of your handleCommand code, ego tracking, etc. ...
 }
 
-// ─── Bot ──────────────────────────────────────────────────────────────────────
+// ─── Start bot with WebSocket connection
 async function startBot(token, selfId) {
-  let heartbeatInterval = null;
-  let statusInterval = null;
-  let statusIndex = 0;
-  let sequence = null;
-  let reconnectDelay = 1000;
-  let currentWs = null;
-  const processingMessageIds = new Set();
-  const recentMessageIds = new Map(); // Track message IDs with timestamp
-  const recentCommandInvocations = new Map(); // Track duplicate command content
-
-  function buildPresence(activity) {
-    return {
-      op: 3,
-      d: {
-        since: null,
-        status: "online",
-        afk: false,
-        activities: [
-          { name: activity.state, type: 0 },
-          { name: "Custom Status", type: 4, state: activity.state },
-        ],
-      },
-    };
-  }
-
-  function connect() {
-    // Close previous connection if still open or closing
-    if (currentWs && currentWs.readyState !== WebSocket.CLOSED) {
-      try { currentWs.close(1000, "Reconnecting"); } catch (err) { console.error("[Gateway] Failed to close previous socket:", err.message); }
-    }
-    
-    console.log("[Gateway] Connecting...");
-    const ws = new WebSocket(GATEWAY_URL, { headers: { Origin: "https://hmus.sys42.net" } });
-    currentWs = ws;
-
-    ws.on("open", () => {
-      if (ws !== currentWs) return;
-      console.log("[Gateway] Connected");
-      reconnectDelay = 1000;
-    });
-
-    ws.on("message", async (raw) => {
-      if (ws !== currentWs) return;
-      const payload = JSON.parse(raw.toString());
-      if (payload.s != null) sequence = payload.s;
-
-      switch (payload.op) {
-        case 10: {
-          const { heartbeat_interval } = payload.d;
-          if (heartbeatInterval) clearInterval(heartbeatInterval);
-          heartbeatInterval = setInterval(() => ws.send(JSON.stringify({ op: 1, d: sequence })), heartbeat_interval);
-          const firstStatus = ROTATING_STATUSES[0];
-          ws.send(JSON.stringify({ op: 2, d: { token, properties: { $os: "linux", $browser: "sinbot", $device: "sinbot" }, presence: { status: "online", activities: [{ name: firstStatus.state, type: 0 }, { name: "Custom Status", type: 4, state: firstStatus.state }], afk: false } } }));
-          if (statusInterval) clearInterval(statusInterval);
-          statusInterval = setInterval(() => {
-            statusIndex = (statusIndex + 1) % ROTATING_STATUSES.length;
-            const next = ROTATING_STATUSES[statusIndex];
-            try { ws.send(JSON.stringify(buildPresence(next))); } catch {}
-            console.log(`[Status] Now: ${next.state}`);
-          }, 3 * 60 * 1000);
-          break;
-        }
-        case 0: {
-          const { t, d } = payload;
-          if (t === "READY") {
-            console.log(`[Bot] Logged in as ${d.user.username} (${d.user.id})`);
-            console.log(`[Bot] Prefix: "${PREFIX}" | Subscribing to ${d.guilds.length} guild(s)...`);
-            for (const guild of d.guilds) {
-              ws.send(JSON.stringify({ op: 14, d: { guild_id: guild.id, typing: true, activities: true, threads: true, members: [] } }));
-            }
-            setTimeout(() => {
-              const current = ROTATING_STATUSES[statusIndex];
-              try { ws.send(JSON.stringify(buildPresence(current))); console.log(`[Status] Set: ${current.state}`); } catch {}
-            }, 2000);
-          }
-          if (t === "PRESENCE_UPDATE" && d.user?.id && d.status) presenceMap.set(d.user.id, d.status);
-          if (t === "GUILD_CREATE") for (const p of d.presences ?? []) { if (p.user?.id && p.status) presenceMap.set(p.user?.id, p.status); }
-          if (t === "GUILD_MEMBER_ADD" && AUTO_ROLE_ID && d.guild_id && d.user?.id) {
-            try {
-              await apiRequest("PUT", `/guilds/${d.guild_id}/members/${d.user.id}/roles/${AUTO_ROLE_ID}`, undefined, token);
-              console.log(`[AutoRole] Assigned role ${AUTO_ROLE_ID} to ${d.user.username} (${d.user.id})`);
-            } catch (err) {
-              console.error(`[AutoRole] Failed to assign role: ${err.message}`);
-            }
-          }
-          if (t === "MESSAGE_CREATE") {
-            const msg = d;
-            const now = Date.now();
-            
-            // Check if this message was recently processed (within 10 seconds)
-            if (recentMessageIds.has(msg.id)) {
-              const lastProcessedTime = recentMessageIds.get(msg.id);
-              if (now - lastProcessedTime < 60000) return;
-            }
-            
-            // Check if currently being processed
-            if (processingMessageIds.has(msg.id)) return;
-            processingMessageIds.add(msg.id);
-            
-            try {
-              const content = (msg.content ?? "").trim();
-              console.log(`[Message] ${msg.author.username}: ${content || "(empty)"}`);
-              if (msg.author.bot && msg.author.id !== selfId) return;
-              if (msg.author.id === selfId) {
-                const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
-                if (prefix) {
-                  const commandKey = `${msg.author.id}:${msg.channel_id}:${content}`;
-                  const lastInvocation = recentCommandInvocations.get(commandKey);
-                  if (lastInvocation && now - lastInvocation < 5000) {
-                    console.log(`[Self Cmd] Suppressed duplicate invocation: ${commandKey}`);
-                    return;
-                  }
-                  recentCommandInvocations.set(commandKey, now);
-                  if (recentCommandInvocations.size > 200) {
-                    for (const [recordKey, recordTime] of recentCommandInvocations) {
-                      if (now - recordTime > 60000) recentCommandInvocations.delete(recordKey);
-                    }
-                  }
-
-                  const withoutPrefix = content.slice(prefix.length).trim();
-                  if (!withoutPrefix) return;
-                  const [cmdName, ...args] = withoutPrefix.split(/\s+/);
-                  console.log(`[Self Cmd] ${cmdName}`);
-                  await handleCommand(cmdName.toLowerCase(), args, msg, token);
-                }
-                return;
-              }
-              const prefix = content.startsWith(PREFIX) ? PREFIX : content.startsWith(ALT_PREFIX) ? ALT_PREFIX : null;
-              if (prefix) {
-                const commandKey = `${msg.author.id}:${msg.channel_id}:${content}`;
-                const lastInvocation = recentCommandInvocations.get(commandKey);
-                if (lastInvocation && now - lastInvocation < 5000) {
-                  console.log(`[Cmd] Suppressed duplicate invocation: ${commandKey}`);
-                  return;
-                }
-                recentCommandInvocations.set(commandKey, now);
-                if (recentCommandInvocations.size > 200) {
-                  for (const [recordKey, recordTime] of recentCommandInvocations) {
-                    if (now - recordTime > 60000) recentCommandInvocations.delete(recordKey);
-                  }
-                }
-
-                const eco = loadEconomy();
-                const callingUser = getUser(eco, msg.author.id);
-                if (callingUser.blacklisted && !isOwner(msg.author.id)) {
-                  await send(msg.channel_id, "🚫 You are currently blacklisted from using commands.", token);
-                  return;
-                }
-                const withoutPrefix = content.slice(prefix.length).trim();
-                if (!withoutPrefix) return;
-                const [cmdName, ...args] = withoutPrefix.split(/\s+/);
-                console.log(`[Cmd] ${cmdName}`);
-                await handleCommand(cmdName.toLowerCase(), args, msg, token);
-                return;
-              }
-              if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
-            } finally {
-              processingMessageIds.delete(msg.id);
-              recentMessageIds.set(msg.id, now);
-            }
-          }
-          break;
-        }
-        case 7:
-          if (ws === currentWs) ws.close();
-          break;
-        case 9:
-          if (ws === currentWs) {
-            reconnectDelay = 5000;
-            ws.close();
-          }
-          break;
+  const ws = new WebSocket(GATEWAY_URL, { headers: { Origin: "https://hmus.sys42.net" } });
+  ws.on("open", () => {
+    console.log("Connected to gateway");
+  });
+  ws.on("message", async (raw) => {
+    const payload = JSON.parse(raw.toString());
+    if (payload.t === "MESSAGE_CREATE") {
+      const msg = payload.d;
+      if (msg.author.id !== selfId) {
+        const content = msg.content ?? "";
+        await handleMessage(content, msg, token);
       }
-    });
-
-    ws.on("close", (code) => {
-      if (ws !== currentWs) return;
-      if (heartbeatInterval) clearInterval(heartbeatInterval);
-      if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
-      console.log(`[Gateway] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
-      currentWs = null;
-      setTimeout(connect, reconnectDelay);
-      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-    });
-
-    ws.on("error", (err) => {
-      if (ws !== currentWs) return;
-      console.error("[Gateway] Error:", err.message);
-    });
-  }
-
-  connect();
+    }
+  });
+  // Add reconnects/error handling as needed
 }
 
-// ─── Entry ────────────────────────────────────────────────────────────────────
+// ─── Main execution
 async function main() {
-  console.log("=== Sinbot ===");
   const token = await login();
   const me = await apiRequest("GET", "/users/@me", undefined, token);
   BOT_USER_ID = me.id;
-  console.log(`Authenticated as: ${me.username} (${me.id})`);
+  console.log(`Logged in as ${me.username} (${me.id})`);
   await startBot(token, me.id);
 }
 
-main().catch((err) => { console.error("Fatal:", err); process.exit(1); });
+async function login() {
+  if (!EMAIL || !PASSWORD) {
+    console.error("Set BOT_EMAIL and BOT_PASSWORD env vars");
+    process.exit(1);
+  }
+  const res = await apiRequest("POST", "/auth/login", { email: EMAIL, password: PASSWORD });
+  if (!res.token) {
+    console.error("Login failed");
+    process.exit(1);
+  }
+  return res.token;
+}
+
+main().catch((err) => {
+  console.error("Fatal:", err);
+  process.exit(1);
+});
