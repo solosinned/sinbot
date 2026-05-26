@@ -9,13 +9,15 @@ import OpenAI from "openai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Set the prefix to "s." so commands like s.help work correctly
+const PREFIX = process.env.BOT_PREFIX ?? "s.";
+
 const API_BASE = "https://hummus.sys42.net/api/v6";
 const GATEWAY_URL = "wss://hummus-gateway.sys42.net/?encoding=json&v=6";
 
 // ─── Config (set these as environment variables on Railway) ───────────────────
 const EMAIL = process.env.BOT_EMAIL ?? "";
 const PASSWORD = process.env.BOT_PASSWORD ?? "";
-const PREFIX = process.env.BOT_PREFIX ?? "s.";
 const AUTO_REPLY = process.env.BOT_AUTO_REPLY === "true";
 const AUTO_REPLY_MESSAGE = process.env.BOT_AUTO_REPLY_MESSAGE ?? "Hello! I'm a bot.";
 const OWNER_ID = process.env.OWNER_ID ?? "";
