@@ -1,3 +1,6 @@
+// Simple test harness to simulate duplicate MESSAGE_CREATE events
+// Run: node test/dup_test.js
+
 const assert = require('assert');
 
 // Copied/simplified dedupe state from bot.js
