@@ -1,253 +1,254 @@
 // @ts-nocheck
+
 import WebSocket from "ws";
-import fs from "fs";
-import OpenAI from "openai";
 
-const GATEWAY_URL = "wss://hummus-gateway.sys42.net/?encoding=json&v=6";
-const API_BASE = "https://hummus.sys42.net/api/v6";
-
+const WS_URL = "wss://hmus.sys42.net/"; // change if your bot uses a different endpoint
 const PREFIX = "s.";
 
-let BOT_USER_ID = "";
-let seq = null;
+const ws = new WebSocket(WS_URL);
 
-// ────────────────────────────────
-// Economy Storage
-// ────────────────────────────────
-const ECO_FILE = "./economy.json";
+// ================= STATE =================
 
-function loadEco() {
-  try { return JSON.parse(fs.readFileSync(ECO_FILE)); }
-  catch { return {}; }
-}
+const users = new Map();
 
-function saveEco(data) {
-  fs.writeFileSync(ECO_FILE, JSON.stringify(data, null, 2));
-}
+const fishTable = [
+  { name: "Boot", value: 1, rarity: "trash" },
+  { name: "Carp", value: 5, rarity: "common" },
+  { name: "Salmon", value: 10, rarity: "common" },
+  { name: "Pufferfish", value: 20, rarity: "uncommon" },
+  { name: "Shark", value: 50, rarity: "rare" },
+  { name: "Golden Fish", value: 200, rarity: "legendary" }
+];
 
-function getUser(eco, id) {
-  if (!eco[id]) {
-    eco[id] = {
+// ================= HELPERS =================
+
+function getUser(id) {
+  if (!users.has(id)) {
+    users.set(id, {
       balance: 0,
-      fish: {},
-      cooldowns: {},
-      ego: { trust: 50, fear: 0, affection: 50, rivalry: 0 }
-    };
+      fish: [],
+      notes: [],
+      lastDaily: 0
+    });
   }
-  return eco[id];
+  return users.get(id);
 }
 
-// ────────────────────────────────
-// Utilities
-// ────────────────────────────────
-const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const now = () => Date.now();
-
-function send(ws, channel_id, content) {
-  ws.send(JSON.stringify({
-    op: 4,
-    d: { channel_id, content }
-  }));
-}
-
-// ────────────────────────────────
-// AI (optional)
-// ────────────────────────────────
-let openai;
-function ai() {
-  if (!openai && process.env.OPENAI_API_KEY) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function send(data) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
   }
-  return openai;
 }
 
-// ────────────────────────────────
-// Commands System
-// ────────────────────────────────
-const commands = new Map();
-
-function cmd(name, fn) {
-  commands.set(name, fn);
+function rand(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// ────────────────────────────────
-// COMMANDS
-// ────────────────────────────────
+// ================= CONNECTION =================
 
-// ping
-cmd("ping", async ({ send }) => {
-  send("Pong 🏓");
+ws.on("open", () => {
+  console.log("Bot connected.");
 });
 
-// help
-cmd("help", async ({ send }) => {
-  send("Commands: ping, balance, fish, work, inventory, ai");
-});
+// ================= MESSAGE HANDLER =================
 
-// balance
-cmd("balance", async ({ u, send }) => {
-  send(`💰 Balance: ${u.balance}`);
-});
+ws.on("message", (raw) => {
+  let msg;
 
-// fish
-cmd("fish", async ({ u, eco, send }) => {
-  const cd = u.cooldowns.fish || 0;
-  if (now() - cd < 20000) return send("⏳ Cooldown active");
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return;
+  }
 
-  const fishList = [
-    { name: "Carp", price: 10 },
-    { name: "Bass", price: 40 },
-    { name: "Golden Koi", price: 120 }
-  ];
+  const text = msg.content;
+  const user = msg.author;
 
-  const fish = rand(fishList);
+  if (!text || !user) return;
+  if (!text.startsWith(PREFIX)) return;
 
-  u.fish[fish.name] = (u.fish[fish.name] || 0) + 1;
-  u.cooldowns.fish = now();
+  const args = text.slice(PREFIX.length).trim().split(/ +/g);
+  const cmd = args.shift()?.toLowerCase();
 
-  saveEco(eco);
+  const u = getUser(user.id);
 
-  send(`🎣 You caught **${fish.name}**`);
-});
+  // ================= HELP =================
+  if (cmd === "help") {
+    return send({
+      content:
+`📜 COMMANDS
 
-// work
-cmd("work", async ({ u, eco, send }) => {
-  const cd = u.cooldowns.work || 0;
-  if (now() - cd < 12 * 60 * 60 * 1000)
-    return send("⏳ You already worked recently");
+🧠 Utility:
+s.help, s.ping, s.remind, s.search, s.note
 
-  const jobs = [
-    "Barista",
-    "Programmer",
-    "Streamer",
-    "Delivery Driver"
-  ];
+🎣 Fishing:
+s.fish, s.inv, s.collection, s.sell all
 
-  const pay = Math.floor(Math.random() * 300) + 100;
+💰 Economy:
+s.balance, s.daily, s.leaderboard, s.crate, s.evolve
 
-  u.balance += pay;
-  u.cooldowns.work = now();
+🎮 Fun:
+s.roll, s.riddle, s.event`
+    });
+  }
 
-  saveEco(eco);
+  // ================= PING =================
+  if (cmd === "ping") {
+    return send({ content: "🏓 Pong!" });
+  }
 
-  send(`💼 You worked as a **${rand(jobs)}** and earned **${pay}**`);
-});
+  // ================= BALANCE =================
+  if (cmd === "balance") {
+    return send({ content: `💰 Balance: ${u.balance}` });
+  }
 
-// inventory
-cmd("inventory", async ({ u, send }) => {
-  send("🐟 Fish: " + JSON.stringify(u.fish));
-});
-
-// ai
-cmd("ai", async ({ args, send }) => {
-  const q = args.join(" ");
-  if (!q) return send("Usage: s.ai <question>");
-
-  const client = ai();
-  if (!client) return send("AI not configured");
-
-  const res = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [{ role: "user", content: q }]
-  });
-
-  send(res.choices[0].message.content);
-});
-
-// joke
-cmd("joke", async ({ send }) => {
-  const jokes = [
-    "Why don't scientists trust atoms?",
-    "I told my computer I needed a break..."
-  ];
-
-  send(rand(jokes));
-});
-
-// ────────────────────────────────
-// Command Runner
-// ────────────────────────────────
-async function run(ws, msg, name, args) {
-  const eco = loadEco();
-  const u = getUser(eco, msg.author.id);
-
-  const fn = commands.get(name);
-  if (!fn) return send(ws, msg.channel_id, "Unknown command");
-
-  await fn({
-    ws,
-    msg,
-    args,
-    eco,
-    u,
-    send: (m) => send(ws, msg.channel_id, m)
-  });
-
-  saveEco(eco);
-}
-
-// ────────────────────────────────
-// Gateway
-// ────────────────────────────────
-function connect(token) {
-  const ws = new WebSocket(GATEWAY_URL);
-
-  ws.on("message", async (raw) => {
-    const p = JSON.parse(raw);
-
-    if (p.s) seq = p.s;
-
-    if (p.op === 10) {
-      setInterval(() => {
-        ws.send(JSON.stringify({ op: 1, d: seq }));
-      }, p.d.heartbeat_interval);
-
-      ws.send(JSON.stringify({
-        op: 2,
-        d: { token }
-      }));
+  // ================= DAILY =================
+  if (cmd === "daily") {
+    const now = Date.now();
+    if (now - u.lastDaily < 86400000) {
+      return send({ content: "⏳ Already claimed daily reward." });
     }
 
-    if (p.t === "MESSAGE_CREATE") {
-      const msg = p.d;
-      const content = msg.content?.trim();
-      if (!content) return;
+    const reward = 50 + Math.floor(Math.random() * 150);
+    u.balance += reward;
+    u.lastDaily = now;
 
-      if (!content.startsWith(PREFIX)) return;
+    return send({ content: `🎁 Daily +${reward} coins` });
+  }
 
-      const [name, ...args] = content
-        .slice(PREFIX.length)
-        .split(/\s+/);
+  // ================= FISH =================
+  if (cmd === "fish") {
+    const fish = rand(fishTable);
+    u.fish.push(fish);
+    u.balance += fish.value;
 
-      await run(ws, msg, name.toLowerCase(), args);
+    return send({
+      content: `🎣 Caught ${fish.name} (${fish.rarity}) +${fish.value}`
+    });
+  }
+
+  // ================= INVENTORY =================
+  if (cmd === "inv") {
+    if (!u.fish.length) return send({ content: "🎒 Empty inventory" });
+
+    return send({
+      content:
+        "🎒 Fish:\n" +
+        u.fish.map((f, i) => `${i + 1}. ${f.name}`).join("\n")
+    });
+  }
+
+  // ================= SELL ALL =================
+  if (cmd === "sell" && args[0] === "all") {
+    let total = u.fish.reduce((a, f) => a + f.value, 0);
+
+    u.balance += total;
+    u.fish = [];
+
+    return send({ content: `💰 Sold all for ${total}` });
+  }
+
+  // ================= COLLECTION =================
+  if (cmd === "collection") {
+    const unique = [...new Set(u.fish.map(f => f.name))];
+
+    return send({
+      content: unique.length
+        ? `📘 Collected: ${unique.join(", ")}`
+        : "📘 Nothing collected yet"
+    });
+  }
+
+  // ================= NOTES =================
+  if (cmd === "note") {
+    const sub = args[0];
+
+    if (sub === "add") {
+      u.notes.push(args.slice(1).join(" "));
+      return send({ content: "📝 Added note" });
     }
-  });
 
-  ws.on("close", () => setTimeout(() => connect(token), 3000));
-}
+    if (sub === "view") {
+      return send({
+        content: u.notes.length
+          ? u.notes.map((n, i) => `${i + 1}. ${n}`).join("\n")
+          : "No notes"
+      });
+    }
 
-// ────────────────────────────────
-// LOGIN
-// ────────────────────────────────
-async function login() {
-  const res = await fetch(`${API_BASE}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: process.env.BOT_EMAIL,
-      password: process.env.BOT_PASSWORD
-    })
-  });
+    if (sub === "remove") {
+      const i = parseInt(args[1]) - 1;
+      u.notes.splice(i, 1);
+      return send({ content: "🗑️ Removed note" });
+    }
+  }
 
-  const data = await res.json();
-  return data.token;
-}
+  // ================= LEADERBOARD =================
+  if (cmd === "leaderboard") {
+    const top = [...users.entries()]
+      .sort((a, b) => b[1].balance - a[1].balance)
+      .slice(0, 5);
 
-// ────────────────────────────────
-// START
-// ────────────────────────────────
-(async () => {
-  const token = await login();
-  console.log("Bot logged in");
-  connect(token);
-})();
+    return send({
+      content:
+        "🏆 Leaderboard:\n" +
+        top.map(([id, u], i) => `${i + 1}. ${id} - ${u.balance}`).join("\n")
+    });
+  }
+
+  // ================= CRATE =================
+  if (cmd === "crate") {
+    const reward = Math.random() < 0.1 ? 500 : 75;
+    u.balance += reward;
+
+    return send({ content: `📦 Crate: +${reward}` });
+  }
+
+  // ================= ROLL =================
+  if (cmd === "roll") {
+    return send({ content: `🎲 ${Math.floor(Math.random() * 100)}` });
+  }
+
+  // ================= RIDDLE =================
+  if (cmd === "riddle") {
+    return send({ content: "🧠 What has keys but no locks?" });
+  }
+
+  // ================= EVENT =================
+  if (cmd === "event") {
+    const events = [
+      "💰 Double coins!",
+      "🎣 Rare fish boosted!",
+      "⚡ XP boost!"
+    ];
+    return send({ content: rand(events) });
+  }
+
+  // ================= EVOLVE =================
+  if (cmd === "evolve") {
+    return send({
+      content: `🧬 Level: ${Math.floor(u.balance / 100)}`
+    });
+  }
+
+  // ================= SEARCH =================
+  if (cmd === "search") {
+    return send({ content: `🔎 ${args.join(" ")}` });
+  }
+
+  // ================= REMIND =================
+  if (cmd === "remind") {
+    const time = parseInt(args[0]);
+    const msgText = args.slice(1).join(" ");
+
+    if (!time || !msgText) {
+      return send({ content: "Usage: s.remind <sec> <msg>" });
+    }
+
+    send({ content: `⏳ Reminder set (${time}s)` });
+
+    setTimeout(() => {
+      send({ content: `⏰ Reminder: ${msgText}` });
+    }, time * 1000);
+  }
+});
