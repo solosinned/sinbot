@@ -211,6 +211,67 @@ const ACHIEVEMENTS = {
 
 const FISH_RARITY_BOOST = { common: 0, uncommon: 0.25, rare: 0.75, epic: 1.5, legendary: 3 };
 
+const SECURITY_LEVELS = [
+  { level: 0, name: "None",             cost: 0,      description: "No protection whatsoever." },
+  { level: 1, name: "Basic Lock",       cost: 500,    description: "Slightly reduces robbery success chance." },
+  { level: 2, name: "Security Camera",  cost: 1_500,  description: "Noticeable protection. Robbers get nervous." },
+  { level: 3, name: "Guard Dog",        cost: 3_500,  description: "Significant deterrent. Low success for robbers." },
+  { level: 4, name: "Private Security", cost: 8_000,  description: "Professional guards + insurance coverage." },
+  { level: 5, name: "Fortress",         cost: 20_000, description: "Maximum protection. 50% insurance on any theft." },
+];
+
+const TRIVIA_QUESTIONS = [
+  { q: "What is the capital of France?", a: "paris", reward: 200 },
+  { q: "How many sides does a hexagon have?", a: "6", reward: 150 },
+  { q: "What planet is known as the Red Planet?", a: "mars", reward: 150 },
+  { q: "Who wrote Romeo and Juliet?", a: "shakespeare", reward: 200 },
+  { q: "What is the chemical symbol for gold?", a: "au", reward: 200 },
+  { q: "How many continents are there on Earth?", a: "7", reward: 150 },
+  { q: "What is the largest ocean on Earth?", a: "pacific", reward: 150 },
+  { q: "What year did World War II end?", a: "1945", reward: 250 },
+  { q: "What is the largest mammal in the world?", a: "blue whale", reward: 200 },
+  { q: "How many bones are in the adult human body?", a: "206", reward: 250 },
+  { q: "What is the powerhouse of the cell?", a: "mitochondria", reward: 150 },
+  { q: "What language has the most native speakers?", a: "mandarin", reward: 200 },
+  { q: "What is the smallest prime number?", a: "2", reward: 150 },
+  { q: "Who painted the Mona Lisa?", a: "da vinci", reward: 200 },
+  { q: "What element has the atomic number 1?", a: "hydrogen", reward: 200 },
+  { q: "In what year was the first iPhone released?", a: "2007", reward: 200 },
+  { q: "What is the largest country by area?", a: "russia", reward: 150 },
+  { q: "What is 12 x 12?", a: "144", reward: 100 },
+  { q: "What is the hardest natural substance on Earth?", a: "diamond", reward: 200 },
+  { q: "Who wrote the Harry Potter series?", a: "j.k. rowling", reward: 150 },
+  { q: "What is the tallest mountain in the world?", a: "everest", reward: 150 },
+  { q: "How many players are on a standard soccer team?", a: "11", reward: 100 },
+  { q: "What is the capital of Japan?", a: "tokyo", reward: 150 },
+  { q: "What gas do plants absorb from the atmosphere?", a: "carbon dioxide", reward: 200 },
+  { q: "Who is credited with inventing the telephone?", a: "bell", reward: 200 },
+  { q: "What is the currency of the United Kingdom?", a: "pound", reward: 150 },
+  { q: "How many strings does a standard guitar have?", a: "6", reward: 100 },
+  { q: "What is the square root of 144?", a: "12", reward: 150 },
+  { q: "What ocean is the Bermuda Triangle in?", a: "atlantic", reward: 200 },
+  { q: "What is the chemical symbol for water?", a: "h2o", reward: 100 },
+  { q: "How many days are in a leap year?", a: "366", reward: 150 },
+  { q: "What is the fastest land animal?", a: "cheetah", reward: 150 },
+  { q: "Who was the first person on the moon?", a: "neil armstrong", reward: 200 },
+  { q: "What is the capital of Australia?", a: "canberra", reward: 200 },
+  { q: "How many minutes are in a day?", a: "1440", reward: 200 },
+  { q: "What is the longest river in the world?", a: "nile", reward: 150 },
+  { q: "What does CPU stand for?", a: "central processing unit", reward: 200 },
+  { q: "In chess, which piece can only move diagonally?", a: "bishop", reward: 150 },
+  { q: "What year did the Titanic sink?", a: "1912", reward: 200 },
+  { q: "How many zeros are in one million?", a: "6", reward: 100 },
+  { q: "What is the capital of Canada?", a: "ottawa", reward: 200 },
+  { q: "How many planets are in our solar system?", a: "8", reward: 150 },
+  { q: "What sport uses a puck?", a: "hockey", reward: 100 },
+  { q: "What is the atomic symbol for iron?", a: "fe", reward: 200 },
+  { q: "Who invented the light bulb?", a: "edison", reward: 150 },
+  { q: "What is the capital of Brazil?", a: "brasilia", reward: 200 },
+  { q: "How many sides does a triangle have?", a: "3", reward: 100 },
+  { q: "What gas makes up most of Earth's atmosphere?", a: "nitrogen", reward: 200 },
+  { q: "What is the longest bone in the human body?", a: "femur", reward: 200 },
+];
+
 // ─── Economy ──────────────────────────────────────────────────────────────────
 const ECONOMY_FILE = path.join(__dirname, "economy.json");
 
@@ -235,6 +296,9 @@ function getUser(data, userId) {
       totalFishSold: 0, totalItemsSold: 0, totalLootboxesOpened: 0,
       lootboxPurchases: [], workCooldown: 0, warnings: [], joinedAt: Date.now(),
       ego: { trust: 50, fear: 0, affection: 50, rivalry: 0, interactions: 0 },
+      security: 0,
+      totalRobs: 0,
+      totalRobsSuccessful: 0,
     };
   }
   return data[userId];
@@ -445,6 +509,10 @@ async function send(channelId, content, token) {
 // ─── Duel state ───────────────────────────────────────────────────────────────
 const pendingDuels = new Map();
 
+// ─── Trade & Trivia state ────────────────────────────────────────────────────
+const pendingTrades = new Map();  // keyed by targetId
+const pendingTrivia = new Map();  // keyed by channelId
+
 // ─── Heist state ─────────────────────────────────────────────────────────────
 const pendingHeists = new Map(); // keyed by channelId
 
@@ -507,7 +575,10 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}coinflip [heads/tails]\` — Flip a coin`,
         `\`${PREFIX}roll [NdN]\` — Roll dice (e.g. 2d6)`,
         `\`${PREFIX}gamble <amount>\` — Spin the slots (min 10 sincoins)`,
-        `\`${PREFIX}rob @user\` — Attempt to steal sincoins (45% success)`,
+        `\`${PREFIX}rob @user\` — Attempt to steal sincoins (security-aware)`,
+        `\`${PREFIX}wanted [@user]\` — Most Wanted list or a user's criminal profile`,
+        `\`${PREFIX}security [@user]\` — View security level`,
+        `\`${PREFIX}buysecurity\` — Upgrade to the next security tier`,
         `\`${PREFIX}heist <amount>\` — Plan a crew heist (50 min buy-in)`,
         `\`${PREFIX}joinheist\` — Join the active heist in this channel`,
         `\`${PREFIX}launchheist\` — Launch the heist early (organizer only)`,
@@ -520,7 +591,9 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}daily\` — Claim daily reward (streak bonuses!)`,
         `\`${PREFIX}work\` — Work for sincoins (12h cooldown)`,
         `\`${PREFIX}pay @user <amount>\` — Send sincoins`,
-        `\`${PREFIX}leaderboard\` — Top balances`, "",
+        `\`${PREFIX}leaderboard\` / \`${PREFIX}lb\` — Top balances`,
+        `\`${PREFIX}lb wanted\` — Most Wanted leaderboard`,
+        `\`${PREFIX}lb security\` — Top security levels`, "",
         "**Fishing**",
         `\`${PREFIX}fish\` — Go fishing (20s cooldown)`,
         `\`${PREFIX}inventory\` — View your fish`,
@@ -539,7 +612,14 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}follow @user\` — Follow a user`,
         `\`${PREFIX}unfollow @user\` — Unfollow a user`,
         `\`${PREFIX}followers [@user]\` — View followers`,
-        `\`${PREFIX}ego @user\` — View bot's opinion of a user`, "",
+        `\`${PREFIX}ego @user\` — View bot's opinion of a user`,
+        `\`${PREFIX}egoguide\` — How the ego system works`,
+        `\`${PREFIX}viewinv @user\` — View another user's inventory`,
+        `\`${PREFIX}trade @user <item> <qty> <price>\` — Offer a trade`,
+        `\`${PREFIX}accepttrade\` — Accept a pending trade`,
+        `\`${PREFIX}declinetrade\` — Decline a pending trade`,
+        `\`${PREFIX}trivia\` — Answer for sincoins`,
+        `\`${PREFIX}answer <text>\` — Answer the active trivia question`, "",
         "**Moderation** *(owner/whitelisted only)*",
         `\`${PREFIX}give @user <amount>\` — Give sincoins`,
         `\`${PREFIX}take @user <amount>\` — Take sincoins`,
@@ -660,25 +740,242 @@ async function handleCommand(name, args, msg, token) {
 
       if (victim.balance < 50) { await send(ch, `❌ **${target.username}** is too broke to rob (under 50 sincoins).`, token); break; }
 
-      const stealPct = rnd(10, 40) / 100;
+      const sec = victim.security ?? 0;
+      const successChance = Math.max(0.10, 0.45 - sec * 0.05);
+      const minPct = Math.max(3, 10 - sec);
+      const maxPct = Math.max(10, 40 - sec * 5);
+      const stealPct = rnd(minPct, maxPct) / 100;
       const stealAmt = Math.floor(victim.balance * stealPct);
-      const success = Math.random() < 0.45;
+      const success = Math.random() < successChance;
+      const secLabel = sec > 0 ? ` *(Security Lv.${sec})*` : "";
+
+      robber.totalRobs = (robber.totalRobs ?? 0) + 1;
 
       if (success) {
+        robber.totalRobsSuccessful = (robber.totalRobsSuccessful ?? 0) + 1;
+        const insurance = Math.floor(stealAmt * sec * 0.10);
         robber.balance += stealAmt;
-        victim.balance = Math.max(0, victim.balance - stealAmt);
+        victim.balance = Math.max(0, victim.balance - stealAmt + insurance);
         nudgeEgo(robber, { rivalry: 5, affection: 2 });
         nudgeEgo(victim, { trust: -8, rivalry: 10, fear: 3 });
         saveEconomy(eco);
-        await send(ch, [`🦹 **Robbery successful!**`, `You slipped away with **${stealAmt.toLocaleString()} sincoins** from **${target.username}** *(${Math.round(stealPct * 100)}% of their balance)*.`, `💰 Your balance: **${robber.balance.toLocaleString()} sincoins**`].join("\n"), token);
+        const insLine = insurance > 0 ? `\n🛡️ **${target.username}**'s insurance covered **${insurance.toLocaleString()} sincoins** back.` : "";
+        await send(ch, [`🦹 **Robbery successful!**${secLabel}`, `You slipped away with **${stealAmt.toLocaleString()} sincoins** from **${target.username}** *(${Math.round(stealPct * 100)}% of their balance)*.${insLine}`, `💰 Your balance: **${robber.balance.toLocaleString()} sincoins**`].join("\n"), token);
       } else {
-        const fine = Math.floor(stealAmt * 0.75);
+        const fine = Math.floor(stealAmt * (0.75 + sec * 0.05));
         robber.balance = Math.max(0, robber.balance - fine);
         nudgeEgo(robber, { trust: -5, fear: 5, rivalry: 3 });
         nudgeEgo(victim, { trust: 5, affection: 3 });
         saveEconomy(eco);
-        await send(ch, [`🚔 **Caught red-handed!**`, `You tried to rob **${target.username}** but got caught. You paid a **${fine.toLocaleString()} sincoin** fine.`, `💰 Your balance: **${robber.balance.toLocaleString()} sincoins**`].join("\n"), token);
+        await send(ch, [`🚔 **Caught red-handed!**${secLabel}`, `You tried to rob **${target.username}** but their security stopped you. Fine: **${fine.toLocaleString()} sincoins**.`, `💰 Your balance: **${robber.balance.toLocaleString()} sincoins**`].join("\n"), token);
       }
+      break;
+    }
+
+    case "wanted": {
+      const eco = loadEconomy();
+      const wantedLevel = (n) => {
+        if (n === 0)  return { title: "Clean",      emoji: "😇" };
+        if (n < 5)    return { title: "Pickpocket", emoji: "🤏" };
+        if (n < 10)   return { title: "Thief",      emoji: "🦹" };
+        if (n < 20)   return { title: "Bandit",     emoji: "🔫" };
+        if (n < 35)   return { title: "Outlaw",     emoji: "🤠" };
+        if (n < 50)   return { title: "Desperado",  emoji: "💀" };
+        if (n < 75)   return { title: "Gang Leader",emoji: "👑" };
+        if (n < 100)  return { title: "Crime Boss", emoji: "🕴️" };
+        return          { title: "Crime Lord",      emoji: "☠️" };
+      };
+      const target = getMentionedUser(msg, args);
+      if (target) {
+        const u = getUser(eco, target.id);
+        const total = u.totalRobs ?? 0;
+        const wins  = u.totalRobsSuccessful ?? 0;
+        const rate  = total > 0 ? Math.round((wins / total) * 100) : 0;
+        const lv    = wantedLevel(total);
+        await send(ch, [`🚨 **Wanted Profile — ${target.username}**`, `${lv.emoji} **${lv.title}**`, `Rob attempts: **${total}** | Successful: **${wins}** | Success rate: **${rate}%**`].join("\n"), token);
+      } else {
+        const sorted = Object.entries(eco).filter(([, u]) => (u.totalRobs ?? 0) > 0).sort(([, a], [, b]) => (b.totalRobs ?? 0) - (a.totalRobs ?? 0)).slice(0, 10);
+        if (sorted.length === 0) { await send(ch, "🚨 No criminals on record yet.", token); break; }
+        const lines = sorted.map(([id, u], i) => {
+          const total = u.totalRobs ?? 0;
+          const wins  = u.totalRobsSuccessful ?? 0;
+          const rate  = Math.round((wins / total) * 100);
+          const lv    = wantedLevel(total);
+          return `**${i + 1}.** <@${id}> — ${lv.emoji} **${lv.title}** *(${total} attempts, ${rate}% success)*`;
+        });
+        await send(ch, `🚨 **Most Wanted**\n${lines.join("\n")}`, token);
+      }
+      break;
+    }
+
+    case "security": {
+      const eco = loadEconomy();
+      const targetId = resolveUserId(args, msg) ?? authorId;
+      const u = getUser(eco, targetId);
+      const sec = u.security ?? 0;
+      const current = SECURITY_LEVELS[sec];
+      const next = SECURITY_LEVELS[sec + 1];
+      const lines = [
+        `🛡️ **Security — ${targetId === authorId ? "You" : `<@${targetId}>`}**`,
+        `Current level: **${sec} — ${current.name}**`,
+        `Effect: Rob success vs you reduced to **${Math.max(10, 45 - sec * 5)}%** | Steal range: **${Math.max(3, 10 - sec)}–${Math.max(10, 40 - sec * 5)}%** | Insurance: **${sec * 10}%**`,
+        "",
+        next
+          ? `Next: **Lv.${next.level} — ${next.name}** — ${next.cost.toLocaleString()} sincoins\n${next.description}\nUse \`${PREFIX}buysecurity\` to upgrade.`
+          : `✅ **Maximum security reached!**`,
+      ];
+      await send(ch, lines.join("\n"), token);
+      break;
+    }
+
+    case "buysecurity": {
+      const eco = loadEconomy();
+      const u = getUser(eco, authorId);
+      const sec = u.security ?? 0;
+      if (sec >= 5) { await send(ch, "✅ You already have maximum security (Fortress).", token); break; }
+      const next = SECURITY_LEVELS[sec + 1];
+      if (u.balance < next.cost) { await send(ch, `❌ You need **${next.cost.toLocaleString()} sincoins** to upgrade to **${next.name}**. You have **${u.balance.toLocaleString()}**.`, token); break; }
+      u.balance -= next.cost;
+      u.security = sec + 1;
+      saveEconomy(eco);
+      await send(ch, [`🛡️ **Security upgraded to Lv.${u.security} — ${next.name}**!`, next.description, `💰 Balance: **${u.balance.toLocaleString()} sincoins**`].join("\n"), token);
+      break;
+    }
+
+    case "viewinv": {
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}viewinv @user\``, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      const fish = Object.entries(u.fishInventory).filter(([, q]) => q > 0);
+      const items = Object.entries(u.itemInventory).filter(([, q]) => q > 0);
+      const _re = (r) => ({ common: "⬜", uncommon: "🟩", rare: "🟦", epic: "🟪", legendary: "🟡" }[r] ?? "📦");
+      const fishLines = fish.length
+        ? fish.map(([n, q]) => { const f = FISH_ITEMS.find((x) => x.name === n); return `${f ? _re(f.rarity) : "🐟"} **${n}** x${q}`; })
+        : ["*(empty)*"];
+      const itemLines = items.length
+        ? items.map(([n, q]) => { const def = COLLECTIBLE_ITEMS.find((x) => x.name === n); return `${def ? _re(def.rarity) : "📦"} **${n}** x${q}`; })
+        : ["*(empty)*"];
+      await send(ch, [`📦 **${target.username}'s Inventory**`, "", "🎣 **Fish**", ...fishLines, "", "🎁 **Items**", ...itemLines].join("\n"), token);
+      break;
+    }
+
+    case "trade": {
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}trade @user <item> <qty> <price>\``, token); break; }
+      if (target.id === authorId) { await send(ch, "❌ You can't trade with yourself.", token); break; }
+      const nums = args.filter((a) => /^\d+$/.test(a));
+      const price = parseInt(nums[nums.length - 1] ?? "0", 10);
+      const qty = parseInt(nums[nums.length - 2] ?? "1", 10);
+      const itemRaw = args.filter((a) => !a.match(/^<@/) && !/^\d+$/.test(a)).join(" ").trim();
+      if (!itemRaw || price < 1 || qty < 1) { await send(ch, `Usage: \`${PREFIX}trade @user <item> <qty> <price>\``, token); break; }
+      const eco = loadEconomy();
+      const sender = getUser(eco, authorId);
+      const allInv = { ...sender.fishInventory, ...sender.itemInventory };
+      const resolvedKey = Object.keys(allInv).find((k) => k.toLowerCase() === itemRaw.toLowerCase());
+      if (!resolvedKey) { await send(ch, `❌ You don't have **${itemRaw}** in your inventory.`, token); break; }
+      const isFish = resolvedKey in sender.fishInventory;
+      const have = isFish ? (sender.fishInventory[resolvedKey] ?? 0) : (sender.itemInventory[resolvedKey] ?? 0);
+      if (have < qty) { await send(ch, `❌ You only have **${have}x ${resolvedKey}**.`, token); break; }
+      pendingTrades.set(target.id, { senderId: authorId, senderName: authorName, targetId: target.id, channelId: ch, itemName: resolvedKey, qty, price, expiresAt: Date.now() + 60_000 });
+      await send(ch, [`🤝 **Trade offer from ${authorName} → ${target.username}**`, `Item: **${qty}x ${resolvedKey}** for **${price.toLocaleString()} sincoins**`, `<@${target.id}> — type \`${PREFIX}accepttrade\` to accept or \`${PREFIX}declinetrade\` to refuse. *(Expires in 60s)*`].join("\n"), token);
+      break;
+    }
+
+    case "accepttrade": {
+      const trade = [...pendingTrades.values()].find((t) => t.targetId === authorId && t.channelId === ch);
+      if (!trade || Date.now() > trade.expiresAt) { pendingTrades.delete(authorId); await send(ch, "❌ No pending trade offer for you here.", token); break; }
+      const eco = loadEconomy();
+      const buyer = getUser(eco, authorId);
+      const seller = getUser(eco, trade.senderId);
+      if (buyer.balance < trade.price) { await send(ch, `❌ You need **${trade.price.toLocaleString()} sincoins** to accept. You have **${buyer.balance.toLocaleString()}**.`, token); break; }
+      const allSellerInv = { ...seller.fishInventory, ...seller.itemInventory };
+      const resolvedKey = Object.keys(allSellerInv).find((k) => k.toLowerCase() === trade.itemName.toLowerCase());
+      const isFish2 = resolvedKey && (resolvedKey in seller.fishInventory);
+      const have2 = resolvedKey ? (allSellerInv[resolvedKey] ?? 0) : 0;
+      if (!resolvedKey || have2 < trade.qty) { pendingTrades.delete(authorId); await send(ch, `❌ **${trade.senderName}** no longer has enough **${trade.itemName}** to complete the trade.`, token); break; }
+      buyer.balance -= trade.price;
+      seller.balance += trade.price;
+      if (isFish2) {
+        seller.fishInventory[resolvedKey] = have2 - trade.qty;
+        if (seller.fishInventory[resolvedKey] === 0) delete seller.fishInventory[resolvedKey];
+        buyer.fishInventory[trade.itemName] = (buyer.fishInventory[trade.itemName] ?? 0) + trade.qty;
+      } else {
+        seller.itemInventory[resolvedKey] = have2 - trade.qty;
+        if (seller.itemInventory[resolvedKey] === 0) delete seller.itemInventory[resolvedKey];
+        buyer.itemInventory[trade.itemName] = (buyer.itemInventory[trade.itemName] ?? 0) + trade.qty;
+      }
+      pendingTrades.delete(authorId);
+      saveEconomy(eco);
+      await send(ch, [`✅ **Trade complete!**`, `**${trade.senderName}** sold **${trade.qty}x ${trade.itemName}** to **${authorName}** for **${trade.price.toLocaleString()} sincoins**.`].join("\n"), token);
+      break;
+    }
+
+    case "declinetrade": {
+      const trade = [...pendingTrades.values()].find((t) => t.targetId === authorId && t.channelId === ch);
+      if (!trade) { await send(ch, "❌ No pending trade offer for you here.", token); break; }
+      pendingTrades.delete(authorId);
+      await send(ch, `❌ **${authorName}** declined the trade from **${trade.senderName}**.`, token);
+      break;
+    }
+
+    case "egoguide": {
+      await send(ch, [
+        `🧠 **=== Ego System Guide ===**`,
+        `The bot tracks how it feels about each user across 4 traits. Use \`${PREFIX}ego @user\` to check someone.`,
+        ``, `**Trust** — Does the bot trust you? (0–100)`,
+        `Low (≤35): Suspicious / Traitor | High (≥75): Trusted / Confidant`,
+        `↑ Raised by: paying others, following users, winning duels fairly`,
+        `↓ Lowered by: robbing, getting blacklisted, getting caught`,
+        ``, `**Affection** — Does the bot like you? (0–100)`,
+        `Low (≤35): Despised / Disliked | High (≥75): Liked / Favorite`,
+        `↑ Raised by: working, winning duels, heist success, getting followed`,
+        `↓ Lowered by: losing fights, robbing others, being idle`,
+        ``, `**Fear** — Does the bot fear you? (0–100)`,
+        `Low (≤10): None | High (≥80): Intimidated / Terrified`,
+        `↑ Raised by: getting caught robbing, warning others, losing duels badly`,
+        `↓ Naturally stays low without repeated aggressive actions`,
+        ``, `**Rivalry** — Are you a rival? (0–100)`,
+        `Low (≤20): None | High (≥65): Rival / Nemesis / Arch-Enemy`,
+        `↑ Raised by: dueling, robbing, heisting, gambling heavily`,
+        `↓ Fades with positive or neutral interactions`,
+        ``, `**How to become friends with the bot:**`,
+        `Work regularly, follow others, win duels, avoid robbing. Aim for Trust 75+ and Affection 75+.`,
+        ``, `**How to become enemies:**`,
+        `Rob constantly, lose every fight, get blacklisted. High Rivalry (65+) + low Trust (≤35) = Arch-Enemy status.`,
+        ``, `The bot may drop passive flavor comments in chat when your stats are extreme.`,
+      ].join("\n"), token);
+      break;
+    }
+
+    case "trivia": {
+      if (pendingTrivia.has(ch)) { await send(ch, `❓ A trivia question is already active! Use \`${PREFIX}answer <your answer>\`.`, token); break; }
+      const q = TRIVIA_QUESTIONS[Math.floor(Math.random() * TRIVIA_QUESTIONS.length)];
+      const trivTimer = setTimeout(async () => {
+        if (pendingTrivia.has(ch)) {
+          pendingTrivia.delete(ch);
+          await send(ch, `⏰ Time's up! The answer was **${q.a}**. No sincoins awarded.`, token).catch(() => {});
+        }
+      }, 45_000);
+      pendingTrivia.set(ch, { question: q.q, answer: q.a, reward: q.reward, channelId: ch, timer: trivTimer });
+      await send(ch, [`❓ **TRIVIA — ${q.reward} sincoins**`, q.q, `Type \`${PREFIX}answer <your answer>\` — you have 45 seconds!`].join("\n"), token);
+      break;
+    }
+
+    case "answer": {
+      const trivia = pendingTrivia.get(ch);
+      if (!trivia) { await send(ch, `❌ No trivia question is active. Start one with \`${PREFIX}trivia\`.`, token); break; }
+      const guess = args.join(" ").trim().toLowerCase();
+      const correct = trivia.answer.toLowerCase();
+      if (guess !== correct && !correct.split(" ").includes(guess)) { await send(ch, `❌ Wrong! Keep trying — \`${PREFIX}answer <guess>\``, token); break; }
+      clearTimeout(trivia.timer);
+      pendingTrivia.delete(ch);
+      const eco = loadEconomy();
+      const u = getUser(eco, authorId);
+      u.balance += trivia.reward;
+      nudgeEgo(u, { trust: 3, affection: 2 });
+      saveEconomy(eco);
+      await send(ch, [`✅ **${authorName}** got it! The answer was **${trivia.answer}**.`, `🏆 +**${trivia.reward} sincoins** | Balance: **${u.balance.toLocaleString()} sincoins**`].join("\n"), token);
       break;
     }
 
@@ -858,6 +1155,24 @@ async function handleCommand(name, args, msg, token) {
     case "leaderboard":
     case "lb": {
       const eco = loadEconomy();
+      const sub = args[0]?.toLowerCase();
+
+      if (sub === "security" || sub === "sec") {
+        const secEmoji = ["🔓", "🔒", "📹", "🐕", "💂", "🏰"];
+        const sorted = Object.entries(eco)
+          .filter(([, u]) => (u.security ?? 0) > 0)
+          .sort(([, a], [, b]) => (b.security ?? 0) - (a.security ?? 0) || b.balance - a.balance)
+          .slice(0, 10);
+        if (sorted.length === 0) { await send(ch, "🛡️ Nobody has purchased any security yet.", token); break; }
+        const lines = sorted.map(([id, u], i) => {
+          const sec = u.security ?? 0;
+          const tier = SECURITY_LEVELS[sec];
+          return `**${i + 1}.** <@${id}> — ${secEmoji[sec]} **Lv.${sec} ${tier.name}**`;
+        });
+        await send(ch, `🛡️ **Top Security Levels**\n${lines.join("\n")}`, token);
+        break;
+      }
+
       const sorted = Object.entries(eco).sort(([, a], [, b]) => b.balance - a.balance).slice(0, 10);
       if (sorted.length === 0) { await send(ch, "No economy data yet.", token); break; }
       await send(ch, `🏆 **Top Balances**\n${sorted.map(([id, u], i) => `**${i + 1}.** <@${id}> — **${u.balance.toLocaleString()} sincoins**`).join("\n")}`, token);
