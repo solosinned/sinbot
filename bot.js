@@ -187,6 +187,20 @@ const COLLECTIBLE_ITEMS = [
   { name: "World Rod",      rarity: "legendary", price: 16000 },
 ];
 
+// ─── Secret Owner-Only Items ──────────────────────────────────────────────────
+const SECRET_OWNER_ITEMS = [
+  { name: "Owner's Crown",         rarity: "legendary", price: 99999, description: "A crown worn only by the server owner." },
+  { name: "Sin's Blade",           rarity: "legendary", price: 88888, description: "A blade forged from pure sin energy." },
+  { name: "Eternal Flame",         rarity: "legendary", price: 77777, description: "A flame that never goes out." },
+  { name: "Void Key",              rarity: "legendary", price: 66666, description: "Opens a door to nowhere." },
+  { name: "God Chip",              rarity: "legendary", price: 55555, description: "Makes you feel like a god. Almost." },
+  { name: "Shadow Sigil",          rarity: "legendary", price: 50000, description: "A mark of the owner's favor." },
+  { name: "Cursed Owner Coin",     rarity: "legendary", price: 45000, description: "A coin that only the owner can bestow." },
+  { name: "Infinity Stone",        rarity: "legendary", price: 100000, description: "One of six. Only the owner holds them." },
+  { name: "Admin Badge",           rarity: "legendary", price: 40000, description: "Proof that you're trusted by the top." },
+  { name: "World Ender",           rarity: "legendary", price: 150000, description: "The rarest item in existence." },
+];
+
 const BOX_RODS = {
   starterbox:    "Starter Rod",
   bronzebox:     "Bronze Rod",
@@ -351,6 +365,7 @@ function getUser(data, userId) {
       security: 0,
       totalRobs: 0,
       totalRobsSuccessful: 0,
+      robHistory: [],
     };
   }
   return data[userId];
@@ -682,7 +697,7 @@ async function handleCommand(name, args, msg, token) {
         `\`${PREFIX}declinetrade\` — Decline a pending trade`,
         `\`${PREFIX}trivia\` — Answer for sincoins`,
         `\`${PREFIX}answer <text>\` — Answer the active trivia question`, "",
-        "**Moderation** *(owner/whitelisted only)*",
+        "**Moderation** *(whitelisted)*",
         `\`${PREFIX}give @user <amount>\` — Give sincoins`,
         `\`${PREFIX}take @user <amount>\` — Take sincoins`,
         `\`${PREFIX}setbalance @user <amount>\` — Set balance`,
@@ -799,6 +814,24 @@ async function handleCommand(name, args, msg, token) {
       const eco = loadEconomy();
       const robber = getUser(eco, authorId);
       const victim = getUser(eco, target.id);
+
+      // Rob cooldown: max 5 robs per hour
+      if (!isOwner(authorId)) {
+        const ROB_WINDOW_MS = 60 * 60 * 1000;
+        const ROB_MAX = 5;
+        const now2 = Date.now();
+        if (!robber.robHistory) robber.robHistory = [];
+        robber.robHistory = robber.robHistory.filter((t) => now2 - t < ROB_WINDOW_MS);
+        if (robber.robHistory.length >= ROB_MAX) {
+          const oldest = robber.robHistory[0];
+          const resetIn = formatDuration(ROB_WINDOW_MS - (now2 - oldest));
+          await send(ch, `⏳ You've robbed **${ROB_MAX} times** this hour. Lay low for **${resetIn}** before robbing again.`, token);
+          break;
+        }
+        robber.robHistory.push(now2);
+      }
+
+      if (victim.godMode) { await send(ch, `🛡️ **${target.username}** is protected by the gods. Robbing them is impossible.`, token); break; }
 
       if (victim.balance < 50) { await send(ch, `❌ **${target.username}** is too broke to rob (under 50 sincoins).`, token); break; }
 
@@ -1177,6 +1210,7 @@ async function handleCommand(name, args, msg, token) {
       const now = Date.now();
       const remaining = WORK_COOLDOWN_MS - (now - user.workCooldown);
       if (remaining > 0) { await send(ch, `⏳ Rest for **${formatDuration(remaining)}** before working again.`, token); break; }
+      if (user.cursed) { user.cursed = false; user.workCooldown = now; saveEconomy(eco); await send(ch, `💼 You showed up to work but everything went wrong. You earned nothing today. *A curse has been lifted.*`, token); break; }
       const job = WORK_JOBS[Math.floor(Math.random() * WORK_JOBS.length)];
       const pay = rnd(job.minPay, job.maxPay);
       user.balance += pay;
@@ -1189,7 +1223,7 @@ async function handleCommand(name, args, msg, token) {
 
     case "pay":
     case "give": {
-      if (isOwner(authorId) && name === "give") {
+      if (name === "give" && (isOwner(authorId) || (() => { const eco2 = loadEconomy(); return getUser(eco2, authorId).whitelisted; })())) {
         const eco = loadEconomy();
         const target = getMentionedUser(msg, args);
         const amount = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "0", 10);
@@ -1248,6 +1282,7 @@ async function handleCommand(name, args, msg, token) {
       const remaining = FISH_COOLDOWN_MS - (now - user.fishCooldown);
       if (remaining > 0) { await send(ch, `🎣 Cooldown! Fish again in **${formatDuration(remaining)}**.`, token); break; }
       user.fishCooldown = now;
+      if (user.cursed) { user.cursed = false; saveEconomy(eco); await send(ch, `🎣 You cast your line but something felt wrong... you caught nothing. *A curse has been lifted.*`, token); break; }
       const caught = weightedRandom(getFishPool(user));
       user.fishInventory[caught.name] = (user.fishInventory[caught.name] ?? 0) + 1;
       user.totalFishCaught++;
@@ -1476,7 +1511,7 @@ async function handleCommand(name, args, msg, token) {
     }
 
     case "take": {
-      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      if (!isOwner(authorId) && !getUser(loadEconomy(), authorId).whitelisted) { await send(ch, "❌ No permission.", token); break; }
       const eco = loadEconomy();
       const target = getMentionedUser(msg, args);
       const amount = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "0", 10);
@@ -1490,7 +1525,7 @@ async function handleCommand(name, args, msg, token) {
 
     case "setbalance":
     case "setbal": {
-      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      if (!isOwner(authorId) && !getUser(loadEconomy(), authorId).whitelisted) { await send(ch, "❌ No permission.", token); break; }
       const eco = loadEconomy();
       const target = getMentionedUser(msg, args);
       const amount = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "0", 10);
@@ -1529,7 +1564,7 @@ async function handleCommand(name, args, msg, token) {
     }
 
     case "clearwarnings": {
-      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      if (!isOwner(authorId) && !getUser(loadEconomy(), authorId).whitelisted) { await send(ch, "❌ No permission.", token); break; }
       const eco = loadEconomy();
       const target = getMentionedUser(msg, args);
       if (!target) { await send(ch, `Usage: \`${PREFIX}clearwarnings @user\``, token); break; }
@@ -1584,6 +1619,306 @@ async function handleCommand(name, args, msg, token) {
       getUser(eco, target.id).whitelisted = false;
       saveEconomy(eco);
       await send(ch, `✅ Removed whitelist from **${target.username}**.`, token);
+      break;
+    }
+
+    // ─── Owner-Only Commands ────────────────────────────────────────────────────
+
+    case "owner": {
+      if (!isOwner(authorId)) { await send(ch, `❓ Unknown command. Use \`${PREFIX}help\` for the command list.`, token); break; }
+      await send(ch, [
+        "👑 **=== Owner Commands ===**", "",
+        "**💰 Economy**",
+        `\`${PREFIX}addmoney <amount>\` — Add sincoins to your own balance`,
+        `\`${PREFIX}wipebal @user\` — Set a user's balance to 0`,
+        `\`${PREFIX}jackpot @user <amount>\` — Drop a bag into someone's account publicly`,
+        `\`${PREFIX}giveall <amount>\` — Give sincoins to every user in the economy`,
+        `\`${PREFIX}swap @user1 @user2\` — Swap two users' balances`,
+        `\`${PREFIX}give @user <amount>\` — Give sincoins to a user`,
+        `\`${PREFIX}take @user <amount>\` — Take sincoins from a user`,
+        `\`${PREFIX}setbalance @user <amount>\` — Set someone's exact balance`, "",
+        "**🎁 Items**",
+        `\`${PREFIX}owngive @user <item>\` — Give a secret owner-only item`,
+        `\`${PREFIX}ownitems\` — List all secret items you can give`,
+        `\`${PREFIX}additem @user <item> [qty]\` — Give any collectible item`,
+        `\`${PREFIX}wipeinv @user\` — Wipe a user's entire inventory`, "",
+        "**⚡ Powers**",
+        `\`${PREFIX}godmode [@user]\` — Make a user immune to robbery`,
+        `\`${PREFIX}ungodmode [@user]\` — Remove god mode`,
+        `\`${PREFIX}curse @user\` — Curse a user (next fish/work earns nothing)`,
+        `\`${PREFIX}uncurse @user\` — Remove curse`,
+        `\`${PREFIX}freeze @user\` — Block a user from all commands`,
+        `\`${PREFIX}unfreeze @user\` — Unfreeze a user`, "",
+        "**🔧 Utility**",
+        `\`${PREFIX}spy @user\` — View a user's full private profile`,
+        `\`${PREFIX}resetcooldowns [@user]\` — Reset all cooldowns`,
+        `\`${PREFIX}maxsecurity [@user]\` — Give max security for free`,
+        `\`${PREFIX}setstreak @user <n>\` — Set daily streak`,
+        `\`${PREFIX}broadcast <msg>\` — Send an owner broadcast`,
+        `\`${PREFIX}blacklist @user\` — Blacklist a user`,
+        `\`${PREFIX}unblacklist @user\` — Unblacklist a user`,
+        `\`${PREFIX}whitelist @user\` — Whitelist a user (dev access)`,
+        `\`${PREFIX}unwhitelist @user\` — Remove whitelist`,
+        `\`${PREFIX}warn @user [reason]\` — Warn a user`,
+        `\`${PREFIX}clearwarnings @user\` — Clear all warnings`,
+      ].join("\n"), token);
+      break;
+    }
+
+    case "owngive": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      const itemArg = args.filter((a) => !a.match(/^<@/) && !/^\d+$/.test(a)).join(" ").trim();
+      if (!target || !itemArg) { await send(ch, `Usage: \`${PREFIX}owngive @user <item name>\`\n**Secret items:** ${SECRET_OWNER_ITEMS.map((i) => `\`${i.name}\``).join(", ")}`, token); break; }
+      const secretItem = SECRET_OWNER_ITEMS.find((i) => i.name.toLowerCase() === itemArg.toLowerCase());
+      if (!secretItem) { await send(ch, `❌ Unknown secret item. Available: ${SECRET_OWNER_ITEMS.map((i) => `\`${i.name}\``).join(", ")}`, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.itemInventory[secretItem.name] = (u.itemInventory[secretItem.name] ?? 0) + 1;
+      saveEconomy(eco);
+      await send(ch, `👑 **Secret item granted!**\nYou gave **${target.username}** the exclusive 🟡 **${secretItem.name}** *(legendary)* — ${secretItem.description}`, token);
+      break;
+    }
+
+    case "ownitems": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const lines = SECRET_OWNER_ITEMS.map((i) => `🟡 **${i.name}** — ${i.description} *(${i.price.toLocaleString()} sincoins)*`);
+      await send(ch, `👑 **Secret Owner Items**\nOnly you can give these out.\n\n${lines.join("\n")}`, token);
+      break;
+    }
+
+    case "resetcooldowns": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args) ?? { id: authorId, username: authorName };
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.fishCooldown = 0;
+      u.workCooldown = 0;
+      u.lastDaily = 0;
+      u.robHistory = [];
+      saveEconomy(eco);
+      await send(ch, `✅ Reset all cooldowns for **${target.username}** *(fish, work, daily, rob)*.`, token);
+      break;
+    }
+
+    case "maxsecurity": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args) ?? { id: authorId, username: authorName };
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.security = 5;
+      saveEconomy(eco);
+      await send(ch, `🏰 Set **${target.username}**'s security to **Lv.5 — Fortress** for free.`, token);
+      break;
+    }
+
+    case "broadcast": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const msg2 = args.join(" ").trim();
+      if (!msg2) { await send(ch, `Usage: \`${PREFIX}broadcast <message>\``, token); break; }
+      await send(ch, `📢 **[OWNER BROADCAST]**\n${msg2}`, token);
+      break;
+    }
+
+    case "wipeinv": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}wipeinv @user\``, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.fishInventory = {};
+      u.itemInventory = {};
+      saveEconomy(eco);
+      await send(ch, `🗑️ Wiped all inventory from **${target.username}**.`, token);
+      break;
+    }
+
+    case "setstreak": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      const amount = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "0", 10);
+      if (!target || amount < 0) { await send(ch, `Usage: \`${PREFIX}setstreak @user <number>\``, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.streak = amount;
+      saveEconomy(eco);
+      await send(ch, `✅ Set **${target.username}**'s daily streak to **${amount}**.`, token);
+      break;
+    }
+
+    case "addmoney": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const amount = parseInt(args[0] ?? "0", 10);
+      if (amount <= 0) { await send(ch, `Usage: \`${PREFIX}addmoney <amount>\``, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, authorId);
+      u.balance += amount;
+      saveEconomy(eco);
+      await send(ch, `💰 Added **${amount.toLocaleString()} sincoins** to your balance. New total: **${u.balance.toLocaleString()} sincoins**`, token);
+      break;
+    }
+
+    case "wipebal": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}wipebal @user\``, token); break; }
+      const eco = loadEconomy();
+      getUser(eco, target.id).balance = 0;
+      saveEconomy(eco);
+      await send(ch, `💸 Wiped **${target.username}**'s balance to 0.`, token);
+      break;
+    }
+
+    case "godmode": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args) ?? { id: authorId, username: authorName };
+      const eco = loadEconomy();
+      getUser(eco, target.id).godMode = true;
+      saveEconomy(eco);
+      await send(ch, `⚡ **${target.username}** is now in God Mode — immune to all robbery.`, token);
+      break;
+    }
+
+    case "ungodmode": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args) ?? { id: authorId, username: authorName };
+      const eco = loadEconomy();
+      getUser(eco, target.id).godMode = false;
+      saveEconomy(eco);
+      await send(ch, `✅ Removed God Mode from **${target.username}**.`, token);
+      break;
+    }
+
+    case "curse": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}curse @user\``, token); break; }
+      const eco = loadEconomy();
+      getUser(eco, target.id).cursed = true;
+      saveEconomy(eco);
+      await send(ch, `🌑 **${target.username}** has been cursed. Their next fish or work attempt yields nothing.`, token);
+      break;
+    }
+
+    case "uncurse": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}uncurse @user\``, token); break; }
+      const eco = loadEconomy();
+      getUser(eco, target.id).cursed = false;
+      saveEconomy(eco);
+      await send(ch, `✅ Removed curse from **${target.username}**.`, token);
+      break;
+    }
+
+    case "freeze": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}freeze @user\``, token); break; }
+      const eco = loadEconomy();
+      getUser(eco, target.id).frozen = true;
+      saveEconomy(eco);
+      await send(ch, `❄️ **${target.username}**'s account has been frozen. They can't use any commands.`, token);
+      break;
+    }
+
+    case "unfreeze": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}unfreeze @user\``, token); break; }
+      const eco = loadEconomy();
+      getUser(eco, target.id).frozen = false;
+      saveEconomy(eco);
+      await send(ch, `✅ **${target.username}**'s account has been unfrozen.`, token);
+      break;
+    }
+
+    case "swap": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const mentions = (msg.mentions ?? []);
+      if (mentions.length < 2) { await send(ch, `Usage: \`${PREFIX}swap @user1 @user2\` — swaps their balances.`, token); break; }
+      const eco = loadEconomy();
+      const u1 = getUser(eco, mentions[0].id);
+      const u2 = getUser(eco, mentions[1].id);
+      const tmp = u1.balance;
+      u1.balance = u2.balance;
+      u2.balance = tmp;
+      saveEconomy(eco);
+      await send(ch, `🔄 Swapped balances:\n**${mentions[0].username}** → **${u1.balance.toLocaleString()} sincoins**\n**${mentions[1].username}** → **${u2.balance.toLocaleString()} sincoins**`, token);
+      break;
+    }
+
+    case "giveall": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const amount = parseInt(args[0] ?? "0", 10);
+      if (amount <= 0) { await send(ch, `Usage: \`${PREFIX}giveall <amount>\``, token); break; }
+      const eco = loadEconomy();
+      let count = 0;
+      for (const id of Object.keys(eco)) { eco[id].balance = (eco[id].balance ?? 0) + amount; count++; }
+      saveEconomy(eco);
+      await send(ch, `🎁 Dropped **${amount.toLocaleString()} sincoins** into **${count}** accounts.`, token);
+      break;
+    }
+
+    case "jackpot": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      const amount = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "0", 10);
+      if (!target || amount <= 0) { await send(ch, `Usage: \`${PREFIX}jackpot @user <amount>\``, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.balance += amount;
+      saveEconomy(eco);
+      await send(ch, `🎰 **JACKPOT!** **${target.username}** just got **${amount.toLocaleString()} sincoins** out of nowhere! Lucky them.`, token);
+      break;
+    }
+
+    case "additem": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      const numArg = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "1", 10);
+      const qty = numArg > 0 ? numArg : 1;
+      const itemRaw = args.filter((a) => !a.match(/^<@/) && !/^\d+$/.test(a)).join(" ").trim();
+      if (!target || !itemRaw) { await send(ch, `Usage: \`${PREFIX}additem @user <item name> [qty]\``, token); break; }
+      const itemDef = COLLECTIBLE_ITEMS.find((i) => i.name.toLowerCase() === itemRaw.toLowerCase());
+      if (!itemDef) { await send(ch, `❌ Unknown item **${itemRaw}**. Check \`${PREFIX}shop\` for valid names.`, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      u.itemInventory[itemDef.name] = (u.itemInventory[itemDef.name] ?? 0) + qty;
+      saveEconomy(eco);
+      await send(ch, `✅ Gave **${target.username}** **${qty}x ${itemDef.name}** ${rarityEmoji(itemDef.rarity)} *(${itemDef.rarity})*.`, token);
+      break;
+    }
+
+    case "spy": {
+      if (!isOwner(authorId)) { await send(ch, "❌ No permission.", token); break; }
+      const target = getMentionedUser(msg, args);
+      if (!target) { await send(ch, `Usage: \`${PREFIX}spy @user\``, token); break; }
+      const eco = loadEconomy();
+      const u = getUser(eco, target.id);
+      const now3 = Date.now();
+      const fishCD  = Math.max(0, FISH_COOLDOWN_MS  - (now3 - (u.fishCooldown  ?? 0)));
+      const workCD  = Math.max(0, WORK_COOLDOWN_MS  - (now3 - (u.workCooldown  ?? 0)));
+      const dailyCD = Math.max(0, DAILY_COOLDOWN_MS - (now3 - (u.lastDaily     ?? 0)));
+      const robHistory = (u.robHistory ?? []).filter((t) => now3 - t < 3_600_000).length;
+      const flags = [
+        u.godMode  ? "⚡ God Mode"  : null,
+        u.cursed   ? "🌑 Cursed"    : null,
+        u.frozen   ? "❄️ Frozen"    : null,
+        u.blacklisted ? "🚫 Blacklisted" : null,
+        u.whitelisted ? "✅ Whitelisted"  : null,
+      ].filter(Boolean);
+      await send(ch, [
+        `🔍 **SPY REPORT — ${target.username}** *(ID: ${target.id})*`,
+        `💰 Balance: **${u.balance.toLocaleString()} sincoins**`,
+        `🎣 Fish CD: **${fishCD > 0 ? formatDuration(fishCD) : "ready"}** | 💼 Work CD: **${workCD > 0 ? formatDuration(workCD) : "ready"}** | 📅 Daily CD: **${dailyCD > 0 ? formatDuration(dailyCD) : "ready"}**`,
+        `🦹 Robs this hour: **${robHistory}/5** | Total: **${u.totalRobs ?? 0}** (${u.totalRobsSuccessful ?? 0} successful)`,
+        `🎣 Fish caught: **${u.totalFishCaught}** | 📦 Boxes opened: **${u.totalLootboxesOpened}**`,
+        `🔥 Daily streak: **${u.streak}** | 🛡️ Security: **Lv.${u.security ?? 0}**`,
+        `🏆 Achievements: **${u.achievements.length}/${Object.keys(ACHIEVEMENTS).length}**`,
+        `⚠️ Warnings: **${(u.warnings ?? []).length}**`,
+        flags.length ? `🚩 Flags: ${flags.join(" | ")}` : `🚩 Flags: none`,
+      ].join("\n"), token);
       break;
     }
 
@@ -1666,7 +2001,25 @@ function startGateway(token, selfId) {
               console.log(`[Msg] ${msg.author.username}: ${content || "(empty)"}`);
               if (msg.author.bot && msg.author.id !== selfId) return;
               const usedPrefix = content.startsWith(PREFIX) ? PREFIX : null;
-              if (!usedPrefix) { if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token); return; }
+              if (!usedPrefix) {
+                // Friend name triggers
+                const lower = content.toLowerCase();
+                const FRIEND_TRIGGERS = [
+                  { name: "frosty",  response: "frosty is so cool the coolest" },
+                  { name: "wil",     response: "wil is my homie bro" },
+                  { name: "ori",     response: "ori you suck at jjs" },
+                  { name: "krabs",   response: "femboy" },
+                  { name: "acid",    response: "fuck acid bro" },
+                ];
+                for (const trigger of FRIEND_TRIGGERS) {
+                  if (lower.includes(trigger.name)) {
+                    await send(msg.channel_id, trigger.response, token);
+                    break;
+                  }
+                }
+                if (AUTO_REPLY && !msg.author.bot) await send(msg.channel_id, AUTO_REPLY_MESSAGE, token);
+                return;
+              }
               const commandKey = `${msg.author.id}:${msg.channel_id}:${content}`;
               const lastInvocation = recentCommandInvocations.get(commandKey);
               if (lastInvocation && now - lastInvocation < 5_000) { console.log(`[Cmd] Suppressed duplicate: ${commandKey}`); return; }
@@ -1676,6 +2029,7 @@ function startGateway(token, selfId) {
                 const eco = loadEconomy();
                 const callingUser = getUser(eco, msg.author.id);
                 if (callingUser.blacklisted && !isOwner(msg.author.id)) { await send(msg.channel_id, "🚫 You are blacklisted from using commands.", token); return; }
+                if (callingUser.frozen && !isOwner(msg.author.id)) { await send(msg.channel_id, "❄️ Your account is frozen. You cannot use any commands.", token); return; }
               }
               const withoutPrefix = content.slice(usedPrefix.length).trim();
               if (!withoutPrefix) return;
